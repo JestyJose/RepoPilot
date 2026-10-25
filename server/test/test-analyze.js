@@ -444,6 +444,284 @@ async function main() {
     assert.ok(audit.metrics.unableToVerifyCount >= 2);
   });
 
+  runTest('Generates tailored CI workflow with npm ci, npm test, and npm run build for JS project with package-lock.json and scripts', () => {
+    const jsProject = {
+      metadata: { language: 'JavaScript', description: 'Web application' },
+      rootItems: [
+        { name: 'README.md', type: 'file', size: 600 },
+        { name: 'package.json', type: 'file' },
+        { name: 'package-lock.json', type: 'file' },
+        { name: '.gitignore', type: 'file' },
+      ],
+      packageJson: {
+        name: 'my-app',
+        scripts: {
+          test: 'jest --ci',
+          build: 'vite build',
+        },
+      },
+      workflows: [], // Missing CI
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(jsProject);
+    const ciRec = audit.recommendations.find(r => r.id === 'rec_ci_workflow');
+    assert.ok(ciRec, 'Should recommend CI workflow');
+
+    // Evidence checks
+    assert.match(ciRec.evidence, /package-lock\.json/i);
+    assert.match(ciRec.evidence, /jest --ci/i);
+    assert.match(ciRec.evidence, /vite build/i);
+
+    // Starter template checks
+    assert.match(ciRec.starterTemplate, /run: npm ci/);
+    assert.match(ciRec.starterTemplate, /cache: 'npm'/);
+    assert.match(ciRec.starterTemplate, /run: npm test/);
+    assert.match(ciRec.starterTemplate, /run: npm run build/);
+    assert.match(ciRec.starterTemplate, /push:/);
+    assert.match(ciRec.starterTemplate, /pull_request:/);
+  });
+
+  runTest('Uses npm install without cache when package-lock.json is absent', () => {
+    const noLockProject = {
+      metadata: { language: 'JavaScript', description: 'Node script project' },
+      rootItems: [
+        { name: 'README.md', type: 'file', size: 600 },
+        { name: 'package.json', type: 'file' },
+        { name: '.gitignore', type: 'file' },
+      ],
+      packageJson: {
+        name: 'script-app',
+        scripts: { test: 'node test.js' },
+      },
+      workflows: [],
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(noLockProject);
+    const ciRec = audit.recommendations.find(r => r.id === 'rec_ci_workflow');
+    assert.ok(ciRec);
+
+    // Should use npm install (not npm ci) because package-lock.json is absent
+    assert.match(ciRec.starterTemplate, /run: npm install/);
+    assert.doesNotMatch(ciRec.starterTemplate, /run: npm ci/);
+  });
+
+  runTest('Omits active failing test and build commands when scripts are absent in package.json', () => {
+    const noScriptsProject = {
+      metadata: { language: 'JavaScript', description: 'Vanilla library' },
+      rootItems: [
+        { name: 'README.md', type: 'file', size: 600 },
+        { name: 'package.json', type: 'file' },
+        { name: 'package-lock.json', type: 'file' },
+      ],
+      packageJson: {
+        name: 'simple-lib',
+        scripts: {}, // No test or build scripts
+      },
+      workflows: [],
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(noScriptsProject);
+    const ciRec = audit.recommendations.find(r => r.id === 'rec_ci_workflow');
+    assert.ok(ciRec);
+
+    // Must not include an active npm test or npm run build command
+    assert.doesNotMatch(ciRec.starterTemplate, /\n      - name: Run automated tests/);
+    assert.doesNotMatch(ciRec.starterTemplate, /\n      - name: Verify production build/);
+    // Mentions commented placeholder for test
+    assert.match(ciRec.starterTemplate, /# - name: Run automated tests/);
+  });
+
+  runTest('Never recommends a duplicate CI workflow when GitHub Actions workflows already exist', () => {
+    const activeCiProject = {
+      metadata: { language: 'JavaScript', description: 'Active CI project' },
+      rootItems: [
+        { name: 'README.md', type: 'file', size: 600 },
+        { name: 'package.json', type: 'file' },
+        { name: 'package-lock.json', type: 'file' },
+      ],
+      packageJson: {
+        name: 'active-ci',
+        scripts: { test: 'jest' },
+      },
+      workflows: [{ name: 'ci.yml' }], // Already has CI workflow
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(activeCiProject);
+    const ciCheck = audit.checks.find(c => c.id === 'ci_workflow');
+    assert.strictEqual(ciCheck.status, 'pass');
+    assert.strictEqual(ciCheck.earnedScore, 20);
+
+    const ciRec = audit.recommendations.find(r => r.id === 'rec_ci_workflow');
+    assert.strictEqual(ciRec, undefined, 'Must not generate a CI recommendation when suitable CI exists');
+  });
+
+  runTest('Generates tailored CI workflow for Yarn projects with yarn.lock, yarn test, and yarn build', () => {
+    const yarnProject = {
+      metadata: { language: 'JavaScript', description: 'Yarn monorepo app' },
+      rootItems: [
+        { name: 'README.md', type: 'file', size: 600 },
+        { name: 'package.json', type: 'file' },
+        { name: 'yarn.lock', type: 'file' },
+      ],
+      packageJson: {
+        name: 'yarn-app',
+        scripts: { test: 'jest', build: 'webpack' },
+      },
+      workflows: [],
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(yarnProject);
+    const ciRec = audit.recommendations.find(r => r.id === 'rec_ci_workflow');
+    assert.ok(ciRec);
+
+    // Verify Yarn commands in starter template
+    assert.match(ciRec.starterTemplate, /run: yarn install --frozen-lockfile/);
+    assert.match(ciRec.starterTemplate, /cache: 'yarn'/);
+    assert.match(ciRec.starterTemplate, /run: yarn test/);
+    assert.match(ciRec.starterTemplate, /run: yarn build/);
+    assert.match(ciRec.evidence, /Yarn \(with yarn\.lock\)/i);
+  });
+
+  runTest('Generates tailored CI workflow for pnpm projects with pnpm-lock.yaml, setup-pnpm, and pnpm run build', () => {
+    const pnpmProject = {
+      metadata: { language: 'JavaScript', description: 'pnpm web app' },
+      rootItems: [
+        { name: 'README.md', type: 'file', size: 600 },
+        { name: 'package.json', type: 'file' },
+        { name: 'pnpm-lock.yaml', type: 'file' },
+      ],
+      packageJson: {
+        name: 'pnpm-app',
+        scripts: { test: 'vitest', build: 'vite build' },
+      },
+      workflows: [],
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(pnpmProject);
+    const ciRec = audit.recommendations.find(r => r.id === 'rec_ci_workflow');
+    assert.ok(ciRec);
+
+    // Verify pnpm setup and commands in starter template
+    assert.match(ciRec.starterTemplate, /uses: pnpm\/action-setup@v3/);
+    assert.match(ciRec.starterTemplate, /cache: 'pnpm'/);
+    assert.match(ciRec.starterTemplate, /run: pnpm install --frozen-lockfile/);
+    assert.match(ciRec.starterTemplate, /run: pnpm test/);
+    assert.match(ciRec.starterTemplate, /run: pnpm run build/);
+    assert.match(ciRec.evidence, /pnpm \(with pnpm-lock\.yaml\)/i);
+  });
+
+  runTest('Does not mark CI as passing for non-YAML workflow files or directory falses', () => {
+    const invalidCiProject = {
+      metadata: { language: 'JavaScript', description: 'Invalid CI project' },
+      rootItems: [
+        { name: 'README.md', type: 'file', size: 600 },
+        { name: 'package.json', type: 'file' },
+        { name: 'azure-pipelines.yml', type: 'dir' }, // Directory with CI filename (unsuitable)
+        { name: 'not-a-travis.yml', type: 'file' },   // Unsuitable filename
+      ],
+      packageJson: {
+        name: 'test-app',
+        scripts: { test: 'jest' },
+      },
+      workflows: [{ name: 'README.md' }, { name: '.DS_Store' }], // Non-YAML files in workflows
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(invalidCiProject);
+    const ciCheck = audit.checks.find(c => c.id === 'ci_workflow');
+    assert.strictEqual(ciCheck.status, 'needs_improvement', 'Must not pass CI check for non-YAML workflows or folder mismatches');
+    assert.strictEqual(ciCheck.earnedScore, 0);
+
+    const ciRec = audit.recommendations.find(r => r.id === 'rec_ci_workflow');
+    assert.ok(ciRec, 'Must generate CI recommendation when suitable CI is absent');
+  });
+
+  runTest('Rejects workflow items with paths outside .github/workflows/', () => {
+    const wrongPathProject = {
+      metadata: { language: 'JavaScript', description: 'Misplaced workflow project' },
+      rootItems: [
+        { name: 'README.md', type: 'file', size: 600 },
+        { name: 'package.json', type: 'file' },
+      ],
+      packageJson: { name: 'app' },
+      workflows: [
+        { name: 'ci.yml', path: 'scripts/ci.yml' }, // Not inside .github/workflows/
+        { name: 'build.yaml', type: 'dir' },        // Directory with YAML extension
+      ],
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(wrongPathProject);
+    const ciCheck = audit.checks.find(c => c.id === 'ci_workflow');
+    assert.strictEqual(ciCheck.status, 'needs_improvement');
+    assert.strictEqual(ciCheck.earnedScore, 0);
+
+    const ciRec = audit.recommendations.find(r => r.id === 'rec_ci_workflow');
+    assert.ok(ciRec);
+  });
+
+  runTest('Resolves multiple lockfiles with documented precedence (pnpm over npm when pnpm-lock.yaml is present)', () => {
+    const multiLockProject = {
+      metadata: { language: 'JavaScript', description: 'Migrated to pnpm' },
+      rootItems: [
+        { name: 'README.md', type: 'file', size: 600 },
+        { name: 'package.json', type: 'file' },
+        { name: 'package-lock.json', type: 'file' }, // Leftover from previous npm setup
+        { name: 'pnpm-lock.yaml', type: 'file' },    // Active pnpm lockfile
+      ],
+      packageJson: {
+        name: 'pnpm-migrated',
+        scripts: { test: 'vitest', build: 'vite build' },
+      },
+      workflows: [],
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(multiLockProject);
+    const ciRec = audit.recommendations.find(r => r.id === 'rec_ci_workflow');
+    assert.ok(ciRec);
+
+    // Must choose pnpm, not npm ci
+    assert.match(ciRec.starterTemplate, /run: pnpm install --frozen-lockfile/);
+    assert.doesNotMatch(ciRec.starterTemplate, /run: npm ci/);
+    assert.match(ciRec.starterTemplate, /run: pnpm test/);
+    assert.match(ciRec.starterTemplate, /run: pnpm run build/);
+  });
+
+  runTest('Respects explicit packageManager field in package.json over lockfiles', () => {
+    const explicitPmProject = {
+      metadata: { language: 'JavaScript', description: 'Explicit packageManager declaration' },
+      rootItems: [
+        { name: 'README.md', type: 'file', size: 600 },
+        { name: 'package.json', type: 'file' },
+        { name: 'package-lock.json', type: 'file' },
+        { name: 'pnpm-lock.yaml', type: 'file' },
+      ],
+      packageJson: {
+        name: 'npm-override',
+        packageManager: 'npm@10.8.0', // Explicit declaration by maintainer
+        scripts: { test: 'jest', build: 'webpack' },
+      },
+      workflows: [],
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(explicitPmProject);
+    const ciRec = audit.recommendations.find(r => r.id === 'rec_ci_workflow');
+    assert.ok(ciRec);
+
+    // Follows explicit declaration
+    assert.match(ciRec.starterTemplate, /run: npm ci/);
+    assert.match(ciRec.starterTemplate, /run: npm test/);
+    assert.match(ciRec.starterTemplate, /run: npm run build/);
+  });
+
   // ----------------------------------------------------
   // Suite 3: HTTP API Endpoint Integration Tests
   // ----------------------------------------------------

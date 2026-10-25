@@ -31,11 +31,99 @@ function detectProjectType(metadata = {}, rootItems = [], packageJson = null) {
   return { type: 'general', language: metadata.language || 'General' };
 }
 
-function getCiTemplate(projectType) {
+function getCiTemplate(projectType, rootItems = [], packageJson = null) {
   switch (projectType.type) {
-    case 'node':
+    case 'node': {
+      const fileNames = (rootItems || []).map(i => (i.name || '').toLowerCase());
+      const hasPackageLock = fileNames.includes('package-lock.json');
+      const hasYarnLock = fileNames.includes('yarn.lock');
+      const hasPnpmLock = fileNames.includes('pnpm-lock.yaml');
+
+      // Sensible, documented Package Manager Precedence:
+      // 1. Explicit maintainer declaration: package.json "packageManager" (e.g. "pnpm@9.0.0", "yarn@4.0.0", "npm@10.0.0").
+      // 2. Lockfile specificity (when multiple lockfiles exist):
+      //    a. pnpm-lock.yaml -> pnpm (pnpm projects require pnpm content-addressable storage; old package-lock.json is often migration artifact).
+      //    b. yarn.lock -> yarn.
+      //    c. package-lock.json -> npm.
+      // 3. Fallback: npm install (no lockfile cache assumptions).
+      const pmField = (packageJson?.packageManager || '').toLowerCase();
+      let chosenPm = null;
+
+      if (pmField.startsWith('pnpm')) {
+        chosenPm = 'pnpm';
+      } else if (pmField.startsWith('yarn')) {
+        chosenPm = 'yarn';
+      } else if (pmField.startsWith('npm')) {
+        chosenPm = 'npm';
+      } else if (hasPnpmLock) {
+        chosenPm = 'pnpm';
+      } else if (hasYarnLock) {
+        chosenPm = 'yarn';
+      } else if (hasPackageLock) {
+        chosenPm = 'npm';
+      } else {
+        chosenPm = 'npm-no-lock';
+      }
+
+      let pmName = 'npm';
+      let installCmd = 'npm install';
+      let cacheConfig = '';
+      let preStep = '';
+
+      if (chosenPm === 'pnpm') {
+        pmName = 'pnpm';
+        installCmd = hasPnpmLock ? 'pnpm install --frozen-lockfile' : 'pnpm install';
+        cacheConfig = "\n          cache: 'pnpm'";
+        preStep = `      - name: Set up pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9\n\n`;
+      } else if (chosenPm === 'yarn') {
+        pmName = 'yarn';
+        installCmd = hasYarnLock ? 'yarn install --frozen-lockfile' : 'yarn install';
+        cacheConfig = "\n          cache: 'yarn'";
+      } else if (chosenPm === 'npm') {
+        pmName = 'npm';
+        installCmd = hasPackageLock ? 'npm ci' : 'npm install';
+        cacheConfig = hasPackageLock ? "\n          cache: 'npm'" : '';
+      } else {
+        pmName = 'npm';
+        installCmd = 'npm install';
+        cacheConfig = '';
+      }
+
+      // Check for test script in package.json
+      const testScript = packageJson?.scripts?.test;
+      const isDefaultNpmError = typeof testScript === 'string' && testScript.includes('Error: no test specified');
+      const hasValidTestScript = Boolean(testScript && !isDefaultNpmError && testScript.trim() !== '');
+
+      let testStep = '';
+      if (hasValidTestScript) {
+        const testCmd = pmName === 'yarn' ? 'yarn test' : `${pmName} test`;
+        testStep = `\n\n      - name: Run automated tests\n        run: ${testCmd}`;
+      } else {
+        testStep = `\n\n      # Automated tests not detected in package.json. Run tests when configured:\n      # - name: Run automated tests\n      #   run: ${pmName} test`;
+      }
+
+      // Check for build script in package.json
+      const buildScript = packageJson?.scripts?.build;
+      const hasBuildScript = Boolean(buildScript && typeof buildScript === 'string' && buildScript.trim() !== '');
+
+      let buildStep = '';
+      if (hasBuildScript) {
+        const buildCmd = pmName === 'yarn' ? 'yarn build' : `${pmName} run build`;
+        buildStep = `\n\n      - name: Verify production build\n        run: ${buildCmd}`;
+      }
+
       return {
         filePath: '.github/workflows/ci.yml',
+        hasValidTestScript,
+        hasBuildScript,
+        hasPackageLock,
+        hasYarnLock,
+        hasPnpmLock,
+        pmName,
+        installCmd,
         template: `name: CI
 
 on:
@@ -45,28 +133,22 @@ on:
     branches: [ main, master ]
 
 jobs:
-  test:
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
+${preStep}      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          node-version: 20${cacheConfig}
 
       - name: Install dependencies
-        run: npm ci
-
-      - name: Run test suite
-        run: npm test --if-present
-
-      - name: Verify build
-        run: npm run build --if-present
+        run: ${installCmd}${testStep}${buildStep}
 `,
       };
+    }
 
     case 'python':
       return {

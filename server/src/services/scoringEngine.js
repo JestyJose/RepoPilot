@@ -484,23 +484,38 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
   // =========================================================================
 
   // Check 7: CI/CD Workflows (20 pts)
-  const hasGithubWorkflows = Array.isArray(workflows) && workflows.length > 0;
-  const altCiItem = rootItems.find(i => 
-    i.name.toLowerCase() === '.circleci' ||
-    /^\.(travis|gitlab-ci|appveyor)\.ya?ml$/i.test(i.name) ||
-    /^(azure-pipelines|bitbucket-pipelines)\.ya?ml$/i.test(i.name) ||
-    /^jenkinsfile$/i.test(i.name)
-  );
+  const validWorkflows = Array.isArray(workflows)
+    ? workflows.filter(w => 
+        w && 
+        w.name && 
+        (!w.type || w.type === 'file') && 
+        /\.(ya?ml)$/i.test(w.name) &&
+        (!w.path || w.path.startsWith('.github/workflows/'))
+      )
+    : null;
+  const hasGithubWorkflows = Boolean(validWorkflows && validWorkflows.length > 0);
+
+  const altCiItem = rootItems.find(i => {
+    if (!i || !i.name) return false;
+    const name = i.name.toLowerCase();
+    if (name === '.circleci') return !i.type || i.type === 'dir';
+    if (i.type && i.type !== 'file') return false;
+    return (
+      /^\.(travis|gitlab-ci|appveyor)\.ya?ml$/i.test(name) ||
+      /^(azure-pipelines|bitbucket-pipelines)\.ya?ml$/i.test(name) ||
+      /^jenkinsfile$/i.test(name)
+    );
+  });
 
   if (hasGithubWorkflows) {
-    const workflowNames = workflows.map(w => w.name).join(', ');
+    const workflowNames = validWorkflows.map(w => w.name).join(', ');
     checks.push({
       ...SCORING_RULES.CI_CD,
       earnedScore: 20,
       status: 'pass',
       passed: true,
-      finding: `Found ${workflows.length} GitHub Actions workflow(s): ${workflowNames}.`,
-      scoreExplanation: `Full points (+20 / 20): Found ${workflows.length} GitHub Actions workflow(s) in .github/workflows/.`,
+      finding: `Found ${validWorkflows.length} GitHub Actions workflow(s): ${workflowNames}.`,
+      scoreExplanation: `Full points (+20 / 20): Found ${validWorkflows.length} GitHub Actions workflow(s) in .github/workflows/.`,
       deductionReason: null,
     });
   } else if (altCiItem) {
@@ -533,16 +548,48 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
       scoreExplanation: '0 / 20 points: No automated CI/CD workflows detected.',
       deductionReason: 'Missing .github/workflows directory or active YAML pipelines.',
     });
-    const ciTemplate = getCiTemplate(projectType);
+    const ciTemplate = getCiTemplate(projectType, rootItems, packageJson);
+
+    let evidence = 'No .github/workflows directory or YAML workflows detected.';
+    let recommendedFix = `Create a GitHub Actions workflow in ${ciTemplate.filePath} that runs on push and pull_request events.`;
+
+    if (projectType.type === 'node') {
+      const pmLabel = ciTemplate.pmName === 'pnpm'
+        ? (ciTemplate.hasPnpmLock ? 'pnpm (with pnpm-lock.yaml)' : 'pnpm (declared in package.json)')
+        : ciTemplate.pmName === 'yarn'
+        ? (ciTemplate.hasYarnLock ? 'Yarn (with yarn.lock)' : 'Yarn (declared in package.json)')
+        : ciTemplate.hasPackageLock
+        ? 'npm (with package-lock.json)'
+        : 'npm (no lockfile detected)';
+
+      const testEvidence = ciTemplate.hasValidTestScript
+        ? `test command in package.json ("npm test" -> "${packageJson?.scripts?.test}")`
+        : 'no automated test script configured in package.json';
+
+      const buildEvidence = ciTemplate.hasBuildScript
+        ? `build script in package.json ("${packageJson?.scripts?.build}")`
+        : 'no build script in package.json';
+
+      evidence = `No .github/workflows directory or active YAML workflows detected. Repository is a ${projectType.language} project using ${pmLabel}. Found ${testEvidence} and ${buildEvidence}.`;
+
+      const stepsDesc = [
+        `installs dependencies via "${ciTemplate.installCmd}"`,
+        ciTemplate.hasValidTestScript ? `runs tests via "${ciTemplate.pmName} test"` : null,
+        ciTemplate.hasBuildScript ? `runs the production build via "${ciTemplate.pmName === 'yarn' ? 'yarn build' : `${ciTemplate.pmName} run build`}"` : null,
+      ].filter(Boolean).join(', ');
+
+      recommendedFix = `Create a GitHub Actions workflow at ${ciTemplate.filePath} configured for Node.js 20 that runs on pushes and pull requests to main/master, ${stepsDesc}.`;
+    }
+
     recommendations.push({
       id: 'rec_ci_workflow',
       title: `Set up Continuous Integration (GitHub Actions) for ${projectType.language}`,
       priority: 'high',
       category: 'Automation',
       estimatedEffort: '15 mins',
-      evidence: 'No .github/workflows directory or YAML workflows detected.',
-      why: 'Continuous Integration demonstrates to hiring managers that your code builds cleanly and automated tests execute automatically on every pull request.',
-      recommendedFix: `Create a GitHub Actions workflow in ${ciTemplate.filePath} that runs on push and pull_request events.`,
+      evidence,
+      why: 'Continuous Integration demonstrates to hiring managers and recruiters that your code builds cleanly, dependencies resolve, and automated tests run automatically on every pull request.',
+      recommendedFix,
       filePath: ciTemplate.filePath,
       starterTemplate: ciTemplate.template,
       verificationCondition: `Add a workflow in ${ciTemplate.filePath} that checks out code, installs dependencies, and runs tests.`,
