@@ -1,0 +1,27 @@
+{
+  "name": "repopilot-monorepo",
+  "version": "1.0.0",
+  "description": "RepoPilot - Transparent GitHub Repository Readiness & Documentation Auditor",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install && npm install --prefix server && npm install --prefix client",
+    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"blue,green\" \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "npm run dev --prefix server",
+    "dev:client": "npm run dev --prefix client",
+    "start:server": "npm start --prefix server",
+    "build:client": "npm run build --prefix client",
+    "test": "npm test --prefix server"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "keywords": [
+    "github",
+    "audit",
+    "react",
+    "express",
+    "portfolio"
+  ],
+  "author": "",
+  "license": "MIT"
+}
