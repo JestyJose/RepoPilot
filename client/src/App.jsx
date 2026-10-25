@@ -12,6 +12,7 @@ import ErrorMessage from './components/ErrorMessage';
 import LoadingSkeleton from './components/LoadingSkeleton';
 import AuthModal from './components/AuthModal';
 import HistoryModal from './components/HistoryModal';
+import AuditSummaryBar from './components/AuditSummaryBar';
 import Footer from './components/Footer';
 
 function MainDashboard() {
@@ -162,6 +163,12 @@ function MainDashboard() {
                 isSaving={isSaving}
                 user={user}
                 onOpenAuth={openAuthWithMessage}
+              />
+
+              {/* Compact Audit Summary Bar */}
+              <AuditSummaryBar
+                audit={auditResult.audit}
+                repository={auditResult.repository}
               />
 
               {/* Score & Category Overview */}

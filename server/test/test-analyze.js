@@ -187,7 +187,102 @@ async function main() {
     const audit = evaluateRepository(shortReadmeRepo);
     const depthCheck = audit.checks.find(c => c.id === 'readme_depth');
     assert.strictEqual(depthCheck.earnedScore, 6);
+    assert.strictEqual(depthCheck.status, 'needs_improvement');
     assert.strictEqual(depthCheck.passed, false);
+  });
+
+  runTest('Recognizes Node.js testing via package.json scripts and dependencies without test/ directory', () => {
+    const nodeRepo = {
+      metadata: { language: 'JavaScript', description: 'Node API project' },
+      rootItems: [
+        { name: 'README.md', type: 'file', size: 600 },
+        { name: 'package.json', type: 'file' },
+        { name: '.gitignore', type: 'file' },
+      ],
+      packageJson: {
+        name: 'sample-api',
+        scripts: { test: 'vitest run' },
+        devDependencies: { vitest: '^1.0.0' },
+      },
+      workflows: [],
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(nodeRepo);
+    const testCheck = audit.checks.find(c => c.id === 'automated_tests');
+    assert.strictEqual(testCheck.status, 'pass');
+    assert.strictEqual(testCheck.earnedScore, 15);
+    assert.match(testCheck.finding, /vitest/i);
+  });
+
+  runTest('Recognizes Python testing signals and provides Python-tailored templates', () => {
+    const pythonRepo = {
+      metadata: { language: 'Python', description: 'Data science toolkit' },
+      rootItems: [
+        { name: 'README.md', type: 'file', size: 500 },
+        { name: 'requirements.txt', type: 'file' },
+        { name: 'pytest.ini', type: 'file' },
+      ],
+      workflows: [],
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(pythonRepo);
+    const testCheck = audit.checks.find(c => c.id === 'automated_tests');
+    assert.strictEqual(testCheck.status, 'pass');
+    assert.strictEqual(testCheck.earnedScore, 15);
+
+    // Check that CI recommendation is tailored to Python
+    const ciRec = audit.recommendations.find(r => r.id === 'rec_ci_workflow');
+    assert.ok(ciRec);
+    assert.match(ciRec.starterTemplate, /actions\/setup-python/i);
+    assert.match(ciRec.starterTemplate, /pytest/i);
+  });
+
+  runTest('Prevents duplicate recommendations when README is missing', () => {
+    const noReadmeRepo = {
+      metadata: { description: 'A project with no README' },
+      rootItems: [
+        { name: 'LICENSE', type: 'file' },
+      ],
+      workflows: [],
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(noReadmeRepo);
+    // Should have rec_readme_presence, but NOT duplicate rec_readme_depth
+    const readmePresenceRec = audit.recommendations.filter(r => r.id === 'rec_readme_presence');
+    const readmeDepthRec = audit.recommendations.filter(r => r.id === 'rec_readme_depth');
+    assert.strictEqual(readmePresenceRec.length, 1);
+    assert.strictEqual(readmeDepthRec.length, 0, 'Should not generate redundant depth recommendation when README is missing');
+  });
+
+  runTest('Validates rich recommendation card schema across all generated recommendations', () => {
+    const emptyRepo = {
+      metadata: { description: '' },
+      rootItems: [],
+      workflows: [],
+      dotGithubContents: [],
+    };
+
+    const audit = evaluateRepository(emptyRepo);
+    assert.ok(audit.recommendations.length > 0);
+
+    for (const rec of audit.recommendations) {
+      assert.ok(rec.id, 'Recommendation must have an id');
+      assert.ok(rec.title, 'Recommendation must have a title');
+      assert.ok(rec.priority, 'Recommendation must have a priority');
+      assert.ok(['high', 'medium', 'low'].includes(rec.priority));
+      assert.ok(rec.category, 'Recommendation must have a category');
+      assert.ok(rec.estimatedEffort, 'Recommendation must have estimatedEffort');
+      assert.ok(rec.evidence, 'Recommendation must have evidence');
+      assert.ok(rec.why, 'Recommendation must have why');
+      assert.ok(rec.recommendedFix, 'Recommendation must have recommendedFix');
+      assert.ok(rec.action, 'Recommendation must have action alias');
+      assert.ok(rec.filePath, 'Recommendation must have filePath');
+      assert.ok(rec.starterTemplate, 'Recommendation must have starterTemplate');
+      assert.ok(rec.verificationCondition, 'Recommendation must have verificationCondition');
+    }
   });
 
   // ----------------------------------------------------

@@ -1803,3 +1803,354 @@ body {
   border-color: rgba(248, 81, 73, 0.3);
 }
 
+/* ==========================================================================
+   Upgraded Dashboard & Actionable Recommendations (Accuracy & UX Upgrades)
+   ========================================================================== */
+
+/* Compact Audit Summary Bar */
+.audit-summary-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1.25rem;
+  backdrop-filter: blur(8px);
+}
+
+.summary-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  color: var(--text-secondary);
+}
+
+.summary-icon {
+  font-size: 0.95rem;
+}
+
+.summary-label {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.summary-value {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.high-priority-chip .summary-value {
+  color: var(--accent-red);
+}
+
+.effort-chip .summary-value {
+  color: var(--accent-amber);
+}
+
+.pass-chip .summary-value {
+  color: var(--accent-green);
+}
+
+.lang-chip {
+  border-color: rgba(56, 189, 248, 0.3);
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.lang-chip .summary-value {
+  color: var(--accent-blue);
+}
+
+/* Recommendation Filter Controls */
+.recommendation-filters-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.filter-group-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  min-width: 75px;
+}
+
+.recommendations-none-match {
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+}
+
+.btn-reset-filters {
+  margin-top: 0.75rem;
+  background: var(--bg-elevated);
+  color: var(--accent-blue);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-reset-filters:hover {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: var(--accent-blue);
+}
+
+/* Upgraded Recommendation Cards */
+.rec-badge-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.effort-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+}
+
+.rec-evidence-box {
+  background: rgba(22, 27, 34, 0.6);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.85rem;
+  margin-top: 0.65rem;
+  font-size: 0.88rem;
+}
+
+.evidence-tag {
+  color: #a5b4fc;
+  font-weight: 700;
+}
+
+.rec-evidence-text {
+  color: var(--text-secondary);
+  display: inline;
+}
+
+.rec-file-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--bg-surface);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  color: var(--accent-blue);
+  margin-top: 0.5rem;
+}
+
+.rec-verify-box {
+  background: rgba(16, 185, 129, 0.05);
+  border-left: 3px solid var(--accent-green);
+  padding: 0.6rem 0.85rem;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  margin-top: 0.65rem;
+  font-size: 0.88rem;
+}
+
+.verify-tag {
+  color: var(--accent-green);
+  font-weight: 700;
+}
+
+.rec-verify-text {
+  color: var(--text-secondary);
+  display: inline;
+}
+
+/* Copyable Starter Template Action */
+.rec-template-wrapper {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 0.85rem;
+}
+
+.template-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.btn-toggle-template {
+  background: transparent;
+  border: none;
+  color: var(--accent-blue);
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  transition: opacity 0.15s;
+}
+
+.btn-toggle-template:hover {
+  text-decoration: underline;
+  opacity: 0.9;
+}
+
+.btn-copy-template {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-copy-template:hover {
+  background: var(--bg-elevated);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+.btn-copy-template.copied {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--accent-green);
+  border-color: rgba(63, 185, 80, 0.4);
+}
+
+.template-code-block {
+  margin-top: 0.75rem;
+  background: #06090e;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.template-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #0f1521;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0.4rem 0.85rem;
+  font-size: 0.75rem;
+}
+
+.template-target-path {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.template-badge {
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  color: var(--accent-blue);
+  background: rgba(56, 189, 248, 0.12);
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+.template-pre {
+  margin: 0;
+  padding: 1rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: #e2e8f0;
+}
+
+/* Upgraded Checklist States & Scoring Rationale */
+.check-unverified {
+  border-left: 3px solid #64748b;
+}
+
+.status-icon-circle.unverified {
+  background: rgba(100, 116, 139, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(100, 116, 139, 0.3);
+}
+
+.status-badge-chip {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  letter-spacing: 0.03em;
+}
+
+.status-badge-chip.status-pass {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--accent-green);
+  border: 1px solid rgba(63, 185, 80, 0.3);
+}
+
+.status-badge-chip.status-needs_improvement {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(248, 81, 73, 0.3);
+}
+
+.status-badge-chip.status-unable_to_verify {
+  background: rgba(100, 116, 139, 0.18);
+  color: #cbd5e1;
+  border: 1px solid rgba(100, 116, 139, 0.35);
+}
+
+.check-score-explanation {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-top: 0.35rem;
+  font-style: italic;
+}
+
+.expl-label {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.score-neutral {
+  color: #94a3b8;
+}
+
+

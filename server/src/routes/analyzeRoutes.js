@@ -62,6 +62,8 @@ router.get('/analyze', async (req, res) => {
         grade: auditReport.grade,
         gradeLabel: auditReport.gradeLabel,
         gradeColor: auditReport.gradeColor,
+        projectType: auditReport.projectType,
+        metrics: auditReport.metrics,
         passedChecksCount: auditReport.passedChecksCount,
         totalChecksCount: auditReport.totalChecksCount,
         categories: auditReport.categories,

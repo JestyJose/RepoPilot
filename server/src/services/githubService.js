@@ -130,6 +130,21 @@ async function getGithubFolderContents(owner, repo) {
 }
 
 /**
+ * Fetches and decodes text content of a single repository file (e.g. package.json, config).
+ */
+async function getFileContent(owner, repo, path) {
+  try {
+    const data = await fetchFromGitHub(`/repos/${owner}/${repo}/contents/${path}`);
+    if (data && data.content && data.encoding === 'base64') {
+      return Buffer.from(data.content, 'base64').toString('utf-8');
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Aggregates all repository data needed for audit.
  */
 async function getCompleteRepoData(owner, repo) {
@@ -144,23 +159,32 @@ async function getCompleteRepoData(owner, repo) {
   // Check if .github directory exists to fetch workflows and templates
   const hasDotGithub = rootItems.some(item => item.name.toLowerCase() === '.github' && item.type === 'dir');
 
-  let workflows = [];
-  let dotGithubContents = [];
+  // Check if package.json exists to inspect scripts and test dependencies
+  const hasPackageJson = rootItems.some(item => item.name.toLowerCase() === 'package.json' && item.type === 'file');
 
-  if (hasDotGithub) {
-    const [wf, ghItems] = await Promise.all([
-      getWorkflows(owner, repo),
-      getGithubFolderContents(owner, repo),
-    ]);
-    workflows = wf;
-    dotGithubContents = ghItems;
+  const asyncTasks = [
+    hasDotGithub ? getWorkflows(owner, repo) : Promise.resolve([]),
+    hasDotGithub ? getGithubFolderContents(owner, repo) : Promise.resolve([]),
+    hasPackageJson ? getFileContent(owner, repo, 'package.json') : Promise.resolve(null),
+  ];
+
+  const [workflows, dotGithubContents, rawPackageJson] = await Promise.all(asyncTasks);
+
+  let packageJson = null;
+  if (rawPackageJson) {
+    try {
+      packageJson = JSON.parse(rawPackageJson);
+    } catch {
+      packageJson = null;
+    }
   }
 
   return {
     metadata,
     rootItems,
-    workflows,
-    dotGithubContents,
+    workflows: Array.isArray(workflows) ? workflows : [],
+    dotGithubContents: Array.isArray(dotGithubContents) ? dotGithubContents : [],
+    packageJson,
   };
 }
 
@@ -168,5 +192,7 @@ module.exports = {
   getRepoMetadata,
   getRepoContents,
   getWorkflows,
+  getFileContent,
   getCompleteRepoData,
 };
+
