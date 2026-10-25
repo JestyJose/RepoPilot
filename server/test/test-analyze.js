@@ -11,7 +11,17 @@ const express = require('express');
 const cors = require('cors');
 
 const { parseAndValidateRepo } = require('../src/utils/repoValidator');
-const { evaluateRepository, calculateGrade } = require('../src/services/scoringEngine');
+const {
+  evaluateRepository,
+  calculateGrade,
+  isLicenseFilename,
+  hasValidGithubLicense,
+  isContributingFilename,
+} = require('../src/services/scoringEngine');
+const {
+  getLicenseTemplate,
+  getContributingTemplate,
+} = require('../src/services/templateGenerator');
 const analyzeRoutes = require('../src/routes/analyzeRoutes');
 
 let passedTests = 0;
@@ -720,6 +730,295 @@ async function main() {
     assert.match(ciRec.starterTemplate, /run: npm ci/);
     assert.match(ciRec.starterTemplate, /run: npm test/);
     assert.match(ciRec.starterTemplate, /run: npm run build/);
+  });
+
+  // ----------------------------------------------------
+  // License & Contributing Comprehensive Test Cases
+  // ----------------------------------------------------
+
+  runTest('Detects existing license via root files (LICENSE, LICENSE.md, LICENSE.txt, COPYING, LICENSE-MIT) without metadata', () => {
+    const licenseVariants = ['LICENSE', 'LICENSE.md', 'LICENSE.txt', 'COPYING', 'LICENSE-MIT', 'LICENSE-APACHE', 'LICENCE', 'UNLICENSE'];
+    for (const fileName of licenseVariants) {
+      const mockProject = {
+        metadata: { description: 'Project with license file' },
+        rootItems: [{ name: fileName, type: 'file' }],
+        workflows: [],
+        dotGithubContents: [],
+      };
+      const audit = evaluateRepository(mockProject);
+      const licenseCheck = audit.checks.find(c => c.id === 'license');
+      assert.strictEqual(licenseCheck.status, 'pass', `Failed for filename: ${fileName}`);
+      assert.strictEqual(licenseCheck.earnedScore, 5, `Expected 5 points for ${fileName}`);
+      const rec = audit.recommendations.find(r => r.id === 'rec_license');
+      assert.strictEqual(rec, undefined, `Must not recommend adding license when ${fileName} exists`);
+    }
+  });
+
+  runTest('Detects existing license via GitHub license metadata without root license file', () => {
+    const metaLicenseProject = {
+      metadata: {
+        description: 'Repo with GitHub license metadata',
+        license: { key: 'mit', name: 'MIT License', spdx_id: 'MIT' },
+      },
+      rootItems: [], // No license file in root
+      workflows: [],
+      dotGithubContents: [],
+    };
+    const audit = evaluateRepository(metaLicenseProject);
+    const licenseCheck = audit.checks.find(c => c.id === 'license');
+    assert.strictEqual(licenseCheck.status, 'pass');
+    assert.strictEqual(licenseCheck.earnedScore, 5);
+    assert.match(licenseCheck.finding, /GitHub repository metadata/i);
+    const rec = audit.recommendations.find(r => r.id === 'rec_license');
+    assert.strictEqual(rec, undefined, 'Must not recommend license when metadata license is valid');
+  });
+
+  runTest('Rejects non-license files and directories from counting as a valid license', () => {
+    const nonLicenseProject = {
+      metadata: { description: 'Repo with invalid license files' },
+      rootItems: [
+        { name: 'license.png', type: 'file' },
+        { name: 'license.json', type: 'file' },
+        { name: 'license_banner.png', type: 'file' },
+        { name: 'LICENSE', type: 'dir' }, // Directory named LICENSE
+      ],
+      workflows: [],
+      dotGithubContents: [],
+    };
+    const audit = evaluateRepository(nonLicenseProject);
+    const licenseCheck = audit.checks.find(c => c.id === 'license');
+    assert.strictEqual(licenseCheck.status, 'needs_improvement');
+    assert.strictEqual(licenseCheck.earnedScore, 0);
+
+    const rec = audit.recommendations.find(r => r.id === 'rec_license');
+    assert.ok(rec, 'Must recommend LICENSE when only invalid files or directories exist');
+  });
+
+  runTest('Recommends MIT license as example when missing, explains owner choice, and uses reliable owner name and year', () => {
+    const missingLicenseProject = {
+      metadata: {
+        name: 'SuperApp',
+        description: 'SuperApp open project',
+        owner: { login: 'octocat' }, // Reliable owner name
+      },
+      rootItems: [
+        { name: 'README.md', type: 'file', size: 500 },
+      ],
+      workflows: [],
+      dotGithubContents: [],
+    };
+    const currentYear = new Date().getFullYear();
+    const audit = evaluateRepository(missingLicenseProject);
+    const rec = audit.recommendations.find(r => r.id === 'rec_license');
+    assert.ok(rec, 'Must generate rec_license recommendation');
+    assert.strictEqual(rec.filePath, 'LICENSE');
+    assert.match(rec.evidence, /No recognized license file/i);
+    assert.match(rec.recommendedFix, /standard MIT License is provided below as a permissive example/i);
+    assert.match(rec.recommendedFix, /choose a license appropriate for your project/i);
+    assert.match(rec.starterTemplate, new RegExp(`Copyright \\(c\\) ${currentYear} octocat`));
+  });
+
+  runTest('Uses clear placeholders [year] and [fullname] when owner name is missing or generic', () => {
+    const genericOwnerProject = {
+      metadata: {
+        name: 'GenericApp',
+        description: 'GenericApp test',
+        owner: { login: 'Maintainer' }, // Generic placeholder name
+      },
+      rootItems: [],
+      workflows: [],
+      dotGithubContents: [],
+    };
+    const audit = evaluateRepository(genericOwnerProject);
+    const rec = audit.recommendations.find(r => r.id === 'rec_license');
+    assert.ok(rec);
+    assert.match(rec.starterTemplate, /Copyright \(c\) \[year\] \[fullname\]/);
+  });
+
+  runTest('Detects existing CONTRIBUTING.md in root and case-insensitive variants without duplicating recommendation', () => {
+    const contributingVariants = [
+      { name: 'CONTRIBUTING.md', type: 'file' },
+      { name: 'contributing.md', type: 'file' },
+      { name: 'Contributing.md', type: 'file' },
+      { name: 'CONTRIBUTING.txt', type: 'file' },
+      { name: 'CONTRIBUTING.rst', type: 'file' },
+      { name: 'CONTRIBUTING', type: 'file' },
+    ];
+    for (const item of contributingVariants) {
+      const mockProject = {
+        metadata: { description: 'Project with contributing file' },
+        rootItems: [item],
+        workflows: [],
+        dotGithubContents: [],
+      };
+      const audit = evaluateRepository(mockProject);
+      const contribCheck = audit.checks.find(c => c.id === 'contributing_guide');
+      assert.strictEqual(contribCheck.status, 'pass', `Failed for filename: ${item.name}`);
+      assert.strictEqual(contribCheck.earnedScore, 8);
+      const rec = audit.recommendations.find(r => r.id === 'rec_contributing_guide');
+      assert.strictEqual(rec, undefined, `Must not recommend CONTRIBUTING when ${item.name} exists`);
+    }
+
+    // Also verify .github/CONTRIBUTING.md
+    const dotGhProject = {
+      metadata: { description: 'Project with .github/CONTRIBUTING.md' },
+      rootItems: [],
+      workflows: [],
+      dotGithubContents: [{ name: 'CONTRIBUTING.md', type: 'file', path: '.github/CONTRIBUTING.md' }],
+    };
+    const dotGhAudit = evaluateRepository(dotGhProject);
+    const dotGhCheck = dotGhAudit.checks.find(c => c.id === 'contributing_guide');
+    assert.strictEqual(dotGhCheck.status, 'pass');
+    assert.strictEqual(dotGhCheck.earnedScore, 8);
+    assert.strictEqual(dotGhAudit.recommendations.find(r => r.id === 'rec_contributing_guide'), undefined);
+  });
+
+  runTest('Does not mark CONTRIBUTING as passing for directories named CONTRIBUTING.md', () => {
+    const dirProject = {
+      metadata: { description: 'Project with directory' },
+      rootItems: [{ name: 'CONTRIBUTING.md', type: 'dir' }],
+      workflows: [],
+      dotGithubContents: [],
+    };
+    const audit = evaluateRepository(dirProject);
+    const contribCheck = audit.checks.find(c => c.id === 'contributing_guide');
+    assert.strictEqual(contribCheck.status, 'needs_improvement');
+    assert.strictEqual(contribCheck.earnedScore, 0);
+    const rec = audit.recommendations.find(r => r.id === 'rec_contributing_guide');
+    assert.ok(rec, 'Must recommend CONTRIBUTING when only a directory exists');
+  });
+
+  runTest('Generates CONTRIBUTING.md recommendation covering prerequisites, setup, branching, commits, tests, PRs, and code review', () => {
+    const missingContribProject = {
+      metadata: { name: 'DemoApp', description: 'Demo project' },
+      rootItems: [{ name: 'README.md', type: 'file', size: 600 }],
+      workflows: [],
+      dotGithubContents: [],
+    };
+    const audit = evaluateRepository(missingContribProject);
+    const rec = audit.recommendations.find(r => r.id === 'rec_contributing_guide');
+    assert.ok(rec, 'Must generate rec_contributing_guide');
+    assert.strictEqual(rec.filePath, 'CONTRIBUTING.md');
+    assert.match(rec.evidence, /No CONTRIBUTING\.md/i);
+
+    // Verify all 7 required core sections are present in starter template
+    const template = rec.starterTemplate;
+    assert.match(template, /## 1\. Prerequisites/i, 'Must cover Prerequisites');
+    assert.match(template, /## 2\. Local Environment Setup/i, 'Must cover Local Environment Setup');
+    assert.match(template, /## 3\. Branch Naming Conventions/i, 'Must cover Branch Naming');
+    assert.match(template, /## 4\. Commit Message Standards/i, 'Must cover Commit Messages');
+    assert.match(template, /## 5\. Running Tests & Quality Assurance/i, 'Must cover Running Tests');
+    assert.match(template, /## 6\. Pull Request Submission/i, 'Must cover Pull Requests');
+    assert.match(template, /## 7\. Code Review Expectations/i, 'Must cover Code Review');
+  });
+
+  runTest('Generates tailored CONTRIBUTING template for Node.js projects with npm, yarn, and pnpm', () => {
+    // 1. npm project
+    const npmProject = {
+      metadata: { name: 'npm-app', language: 'JavaScript' },
+      rootItems: [
+        { name: 'package.json', type: 'file' },
+        { name: 'package-lock.json', type: 'file' },
+      ],
+      packageJson: { scripts: { test: 'jest', dev: 'vite' } },
+      workflows: [],
+      dotGithubContents: [],
+    };
+    const npmAudit = evaluateRepository(npmProject);
+    const npmRec = npmAudit.recommendations.find(r => r.id === 'rec_contributing_guide');
+    assert.ok(npmRec);
+    assert.match(npmRec.starterTemplate, /npm install/);
+    assert.match(npmRec.starterTemplate, /npm run dev/);
+    assert.match(npmRec.starterTemplate, /npm test/);
+
+    // 2. yarn project
+    const yarnProject = {
+      metadata: { name: 'yarn-app', language: 'JavaScript' },
+      rootItems: [
+        { name: 'package.json', type: 'file' },
+        { name: 'yarn.lock', type: 'file' },
+      ],
+      packageJson: { scripts: { test: 'jest', dev: 'next dev', build: 'next build' } },
+      workflows: [],
+      dotGithubContents: [],
+    };
+    const yarnAudit = evaluateRepository(yarnProject);
+    const yarnRec = yarnAudit.recommendations.find(r => r.id === 'rec_contributing_guide');
+    assert.ok(yarnRec);
+    assert.match(yarnRec.starterTemplate, /yarn install/);
+    assert.match(yarnRec.starterTemplate, /yarn dev/);
+    assert.match(yarnRec.starterTemplate, /yarn test/);
+    assert.match(yarnRec.starterTemplate, /yarn build/);
+
+    // 3. pnpm project
+    const pnpmProject = {
+      metadata: { name: 'pnpm-app', language: 'TypeScript' },
+      rootItems: [
+        { name: 'package.json', type: 'file' },
+        { name: 'pnpm-lock.yaml', type: 'file' },
+      ],
+      packageJson: { scripts: { test: 'vitest', build: 'tsc' } },
+      workflows: [],
+      dotGithubContents: [],
+    };
+    const pnpmAudit = evaluateRepository(pnpmProject);
+    const pnpmRec = pnpmAudit.recommendations.find(r => r.id === 'rec_contributing_guide');
+    assert.ok(pnpmRec);
+    assert.match(pnpmRec.starterTemplate, /pnpm install/);
+    assert.match(pnpmRec.starterTemplate, /pnpm test/);
+    assert.match(pnpmRec.starterTemplate, /pnpm run build/);
+  });
+
+  runTest('Generates tailored CONTRIBUTING template for Python and Go projects', () => {
+    // Python
+    const pyProject = {
+      metadata: { name: 'py-toolkit', language: 'Python' },
+      rootItems: [
+        { name: 'requirements.txt', type: 'file' },
+      ],
+      workflows: [],
+      dotGithubContents: [],
+    };
+    const pyAudit = evaluateRepository(pyProject);
+    const pyRec = pyAudit.recommendations.find(r => r.id === 'rec_contributing_guide');
+    assert.ok(pyRec);
+    assert.match(pyRec.starterTemplate, /python -m venv venv/);
+    assert.match(pyRec.starterTemplate, /pip install -r requirements\.txt/);
+    assert.match(pyRec.starterTemplate, /pytest/);
+
+    // Go
+    const goProject = {
+      metadata: { name: 'go-microservice', language: 'Go' },
+      rootItems: [
+        { name: 'go.mod', type: 'file' },
+      ],
+      workflows: [],
+      dotGithubContents: [],
+    };
+    const goAudit = evaluateRepository(goProject);
+    const goRec = goAudit.recommendations.find(r => r.id === 'rec_contributing_guide');
+    assert.ok(goRec);
+    assert.match(goRec.starterTemplate, /go mod download/);
+    assert.match(goRec.starterTemplate, /go test -v -race/);
+  });
+
+  runTest('Direct unit tests for getLicenseTemplate and getContributingTemplate generators', () => {
+    // getLicenseTemplate with reliable name & explicit year
+    const t1 = getLicenseTemplate('Alice Developer', 2026);
+    assert.match(t1.template, /Copyright \(c\) 2026 Alice Developer/);
+
+    // getLicenseTemplate with null/unreliable name
+    const t2 = getLicenseTemplate(null);
+    assert.match(t2.template, /Copyright \(c\) \[year\] \[fullname\]/);
+    const t3 = getLicenseTemplate('Maintainer');
+    assert.match(t3.template, /Copyright \(c\) \[year\] \[fullname\]/);
+
+    // getContributingTemplate default fallback
+    const cDefault = getContributingTemplate('GenericLib');
+    assert.strictEqual(cDefault.filePath, 'CONTRIBUTING.md');
+    assert.match(cDefault.template, /# Contributing to GenericLib/);
+    assert.match(cDefault.template, /## 1\. Prerequisites/);
+    assert.match(cDefault.template, /## 7\. Code Review Expectations/);
   });
 
   // ----------------------------------------------------

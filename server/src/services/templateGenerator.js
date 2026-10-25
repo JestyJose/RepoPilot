@@ -31,39 +31,55 @@ function detectProjectType(metadata = {}, rootItems = [], packageJson = null) {
   return { type: 'general', language: metadata.language || 'General' };
 }
 
+function detectNodePackageManager(rootItems = [], packageJson = null) {
+  const fileNames = (rootItems || []).map(i => (i.name || '').toLowerCase());
+  const hasPackageLock = fileNames.includes('package-lock.json');
+  const hasYarnLock = fileNames.includes('yarn.lock');
+  const hasPnpmLock = fileNames.includes('pnpm-lock.yaml');
+
+  // Sensible, documented Package Manager Precedence:
+  // 1. Explicit maintainer declaration: package.json "packageManager" (e.g. "pnpm@9.0.0", "yarn@4.0.0", "npm@10.0.0").
+  // 2. Lockfile specificity (when multiple lockfiles exist):
+  //    a. pnpm-lock.yaml -> pnpm (pnpm projects require pnpm content-addressable storage; old package-lock.json is often migration artifact).
+  //    b. yarn.lock -> yarn.
+  //    c. package-lock.json -> npm.
+  // 3. Fallback: npm install (no lockfile cache assumptions).
+  const pmField = (packageJson?.packageManager || '').toLowerCase();
+  let chosenPm = null;
+
+  if (pmField.startsWith('pnpm')) {
+    chosenPm = 'pnpm';
+  } else if (pmField.startsWith('yarn')) {
+    chosenPm = 'yarn';
+  } else if (pmField.startsWith('npm')) {
+    chosenPm = 'npm';
+  } else if (hasPnpmLock) {
+    chosenPm = 'pnpm';
+  } else if (hasYarnLock) {
+    chosenPm = 'yarn';
+  } else if (hasPackageLock) {
+    chosenPm = 'npm';
+  } else {
+    chosenPm = 'npm-no-lock';
+  }
+
+  return {
+    chosenPm,
+    hasPackageLock,
+    hasYarnLock,
+    hasPnpmLock,
+  };
+}
+
 function getCiTemplate(projectType, rootItems = [], packageJson = null) {
   switch (projectType.type) {
     case 'node': {
-      const fileNames = (rootItems || []).map(i => (i.name || '').toLowerCase());
-      const hasPackageLock = fileNames.includes('package-lock.json');
-      const hasYarnLock = fileNames.includes('yarn.lock');
-      const hasPnpmLock = fileNames.includes('pnpm-lock.yaml');
-
-      // Sensible, documented Package Manager Precedence:
-      // 1. Explicit maintainer declaration: package.json "packageManager" (e.g. "pnpm@9.0.0", "yarn@4.0.0", "npm@10.0.0").
-      // 2. Lockfile specificity (when multiple lockfiles exist):
-      //    a. pnpm-lock.yaml -> pnpm (pnpm projects require pnpm content-addressable storage; old package-lock.json is often migration artifact).
-      //    b. yarn.lock -> yarn.
-      //    c. package-lock.json -> npm.
-      // 3. Fallback: npm install (no lockfile cache assumptions).
-      const pmField = (packageJson?.packageManager || '').toLowerCase();
-      let chosenPm = null;
-
-      if (pmField.startsWith('pnpm')) {
-        chosenPm = 'pnpm';
-      } else if (pmField.startsWith('yarn')) {
-        chosenPm = 'yarn';
-      } else if (pmField.startsWith('npm')) {
-        chosenPm = 'npm';
-      } else if (hasPnpmLock) {
-        chosenPm = 'pnpm';
-      } else if (hasYarnLock) {
-        chosenPm = 'yarn';
-      } else if (hasPackageLock) {
-        chosenPm = 'npm';
-      } else {
-        chosenPm = 'npm-no-lock';
-      }
+      const {
+        chosenPm,
+        hasPackageLock,
+        hasYarnLock,
+        hasPnpmLock,
+      } = detectNodePackageManager(rootItems, packageJson);
 
       let pmName = 'npm';
       let installCmd = 'npm install';
@@ -302,13 +318,36 @@ Add automated unit or integration tests using your framework of choice.
   }
 }
 
-function getLicenseTemplate(ownerName = 'Your Name') {
-  const year = new Date().getFullYear();
+function isReliableName(name) {
+  if (!name || typeof name !== 'string') return false;
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  const genericNames = ['maintainer', 'your name', 'your_name', 'owner', 'repository owner', 'unknown', '[fullname]', '<name of copyright holder>'];
+  return !genericNames.includes(trimmed.toLowerCase());
+}
+
+function isReliableYear(year) {
+  if (year === null || year === undefined) return false;
+  const num = Number(year);
+  return Number.isInteger(num) && num >= 1970 && num <= 2100;
+}
+
+function getLicenseTemplate(ownerName = null, year = null) {
+  const reliableOwner = isReliableName(ownerName);
+  
+  // Year is reliable if explicitly passed as valid integer, or if owner is reliable we use current year
+  const effectiveYear = year !== null
+    ? (isReliableYear(year) ? Number(year) : null)
+    : (reliableOwner ? new Date().getFullYear() : null);
+
+  const copyrightYear = effectiveYear !== null ? String(effectiveYear) : '[year]';
+  const copyrightHolder = reliableOwner ? ownerName.trim() : '[fullname]';
+
   return {
     filePath: 'LICENSE',
     template: `MIT License
 
-Copyright (c) ${year} ${ownerName}
+Copyright (c) ${copyrightYear} ${copyrightHolder}
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -331,33 +370,278 @@ SOFTWARE.
   };
 }
 
-function getContributingTemplate(repoName = 'Project') {
+function getContributingTemplate(repoName = 'Project', projectType = { type: 'general' }, rootItems = [], packageJson = null) {
+  const cleanRepo = repoName && typeof repoName === 'string' && repoName.trim() !== '' ? repoName.trim() : 'Project';
+  const type = projectType?.type || 'general';
+  const lang = projectType?.language || 'General';
+
+  let prereqSection = '';
+  let setupSteps = '';
+  let testSteps = '';
+  let buildSection = '';
+
+  if (type === 'node') {
+    const { chosenPm } = detectNodePackageManager(rootItems, packageJson);
+    const pm = chosenPm === 'pnpm' ? 'pnpm' : (chosenPm === 'yarn' ? 'yarn' : 'npm');
+    const pmLabel = pm === 'pnpm' 
+      ? 'pnpm (v9+ recommended)' 
+      : (pm === 'yarn' ? 'Yarn (v1.22+ or Berry)' : 'npm (bundled with Node.js)');
+    const pmInstall = pm === 'pnpm'
+      ? '- Run `npm install -g pnpm` or enable via Corepack: `corepack enable`'
+      : (pm === 'yarn' ? '- Run `npm install -g yarn` or enable via Corepack: `corepack enable`' : '- Included automatically with Node.js');
+
+    const hasTestScript = Boolean(
+      packageJson?.scripts?.test &&
+      !packageJson.scripts.test.includes('Error: no test specified') &&
+      packageJson.scripts.test.trim() !== ''
+    );
+    const hasDevScript = Boolean(packageJson?.scripts?.dev && packageJson.scripts.dev.trim() !== '');
+    const hasStartScript = Boolean(packageJson?.scripts?.start && packageJson.scripts.start.trim() !== '');
+    const hasBuildScript = Boolean(packageJson?.scripts?.build && packageJson.scripts.build.trim() !== '');
+
+    const installCmd = pm === 'pnpm' ? 'pnpm install' : (pm === 'yarn' ? 'yarn install' : 'npm install');
+    const devCmd = hasDevScript
+      ? (pm === 'yarn' ? 'yarn dev' : `${pm} run dev`)
+      : (hasStartScript ? (pm === 'yarn' ? 'yarn start' : `${pm} start`) : null);
+
+    const testCmd = pm === 'yarn' ? 'yarn test' : `${pm} test`;
+    const buildCmd = pm === 'yarn' ? 'yarn build' : `${pm} run build`;
+
+    prereqSection = `Before contributing, ensure you have the following installed locally:
+- **Node.js**: v18.0.0 or higher (v20 LTS recommended)
+- **${pmLabel}**:
+  ${pmInstall}
+- **Git**: Installed and configured on your machine`;
+
+    let startStep = '';
+    if (devCmd) {
+      startStep = `\n4. **Start the local development server** (configured in \`package.json\`):
+   \`\`\`bash
+   ${devCmd}
+   \`\`\``;
+    } else {
+      startStep = `\n4. **Start the local development server** (assumed command; configure in \`package.json\`):
+   \`\`\`bash
+   ${pm === 'yarn' ? 'yarn dev' : `${pm} run dev`}  # Assumed command (add "dev" or "start" script to package.json)
+   \`\`\``;
+    }
+
+    setupSteps = `1. **Fork the repository** on GitHub by clicking the **Fork** button.
+2. **Clone your fork** locally:
+   \`\`\`bash
+   git clone https://github.com/YOUR_USERNAME/${cleanRepo}.git
+   cd ${cleanRepo}
+   \`\`\`
+3. **Install dependencies**:
+   \`\`\`bash
+   ${installCmd}
+   \`\`\`${startStep}`;
+
+    if (hasTestScript) {
+      testSteps = `Execute the automated test suite (configured in \`package.json\` "test" script):
+\`\`\`bash
+${testCmd}
+\`\`\``;
+    } else {
+      testSteps = `Execute the automated test suite (assumed command; configure \`"test"\` script in \`package.json\`):
+\`\`\`bash
+${testCmd}  # Assumed standard test runner (configure in package.json if different)
+\`\`\``;
+    }
+
+    if (hasBuildScript) {
+      buildSection = `\nVerify the production build succeeds without errors (configured in \`package.json\` "build" script):
+\`\`\`bash
+${buildCmd}
+\`\`\`\n`;
+    }
+  } else if (type === 'python') {
+    prereqSection = `Before contributing, ensure you have the following installed locally:
+- **Python**: v3.10 or higher (v3.11 recommended)
+- **pip**: Python package installer
+- **virtualenv** or built-in \`venv\`
+- **Git**: Installed and configured on your machine`;
+
+    const hasReqs = (rootItems || []).some(i => i.name && i.name.toLowerCase() === 'requirements.txt');
+    const hasPytest = (rootItems || []).some(i => i.name && /^(pytest\.ini|conftest\.py|tests?)$/i.test(i.name));
+
+    setupSteps = `1. **Fork the repository** on GitHub by clicking the **Fork** button.
+2. **Clone your fork** locally:
+   \`\`\`bash
+   git clone https://github.com/YOUR_USERNAME/${cleanRepo}.git
+   cd ${cleanRepo}
+   \`\`\`
+3. **Create and activate a virtual environment**:
+   \`\`\`bash
+   # Create virtual environment
+   python -m venv venv
+
+   # Activate virtual environment
+   # On macOS/Linux:
+   source venv/bin/activate
+   # On Windows (cmd/PowerShell):
+   .\\venv\\Scripts\\activate
+   \`\`\`
+4. **Install development dependencies**:
+   \`\`\`bash
+   pip install -r requirements.txt${hasReqs ? '  # Verified from repository requirements.txt' : '  # Assumed dependencies file'}
+   pip install pytest${hasPytest ? '  # Configured test runner' : '  # Assumed test runner'}
+   \`\`\``;
+
+    testSteps = `Run the test suite using pytest${hasPytest ? ' (configured in project)' : ' (assumed test runner)'}:
+\`\`\`bash
+pytest${hasPytest ? '' : '  # Assumed command (or python -m unittest)'}
+\`\`\``;
+  } else if (type === 'go') {
+    prereqSection = `Before contributing, ensure you have the following installed locally:
+- **Go**: v1.21 or higher
+- **Git**: Installed and configured on your machine`;
+
+    setupSteps = `1. **Fork the repository** on GitHub by clicking the **Fork** button.
+2. **Clone your fork** locally:
+   \`\`\`bash
+   git clone https://github.com/YOUR_USERNAME/${cleanRepo}.git
+   cd ${cleanRepo}
+   \`\`\`
+3. **Download dependencies**:
+   \`\`\`bash
+   go mod download
+   \`\`\``;
+
+    testSteps = `Run automated tests with race detection and verbose output:
+\`\`\`bash
+go test -v -race ./...
+\`\`\``;
+  } else if (type === 'rust') {
+    prereqSection = `Before contributing, ensure you have the following installed locally:
+- **Rust & Cargo**: Latest stable toolchain via \`rustup\`
+- **Git**: Installed and configured on your machine`;
+
+    setupSteps = `1. **Fork the repository** on GitHub by clicking the **Fork** button.
+2. **Clone your fork** locally:
+   \`\`\`bash
+   git clone https://github.com/YOUR_USERNAME/${cleanRepo}.git
+   cd ${cleanRepo}
+   \`\`\`
+3. **Build the project**:
+   \`\`\`bash
+   cargo build
+   \`\`\``;
+
+    testSteps = `Run all unit and integration tests:
+\`\`\`bash
+cargo test
+\`\`\``;
+  } else {
+    // General
+    prereqSection = `Before contributing, ensure you have the following installed locally:
+- **Git**: Installed and configured with your name and email
+- **${lang} Runtime**: Latest stable runtime and build tooling for ${lang}`;
+
+    setupSteps = `1. **Fork the repository** on GitHub by clicking the **Fork** button.
+2. **Clone your fork** locally:
+   \`\`\`bash
+   git clone https://github.com/YOUR_USERNAME/${cleanRepo}.git
+   cd ${cleanRepo}
+   \`\`\`
+3. **Install project dependencies and setup your local environment** following the project README.`;
+
+    testSteps = `Run the automated test suite before opening a pull request:
+\`\`\`bash
+# Run tests using the project's configured test runner
+\`\`\``;
+  }
+
+  const template = `# Contributing to ${cleanRepo}
+
+Thank you for your interest in contributing to **${cleanRepo}**! We welcome bug reports, feature requests, documentation improvements, and code contributions. Please take a moment to review this guide before submitting your work.
+
+---
+
+## 1. Prerequisites
+${prereqSection}
+
+---
+
+## 2. Local Environment Setup
+${setupSteps}
+
+---
+
+## 3. Branch Naming Conventions
+Always create a new branch from \`main\` for your changes:
+\`\`\`bash
+git checkout -b <type>/<short-description>
+\`\`\`
+
+Recommended branch prefixes:
+- \`feat/\` - New features (e.g., \`feat/auth-modal\`, \`feat/export-csv\`)
+- \`fix/\` - Bug fixes (e.g., \`fix/validation-regex\`, \`fix/memory-leak\`)
+- \`docs/\` - Documentation improvements (e.g., \`docs/contributing-guide\`, \`docs/api-specs\`)
+- \`test/\` - Adding or updating automated tests (e.g., \`test/scoring-engine\`)
+- \`refactor/\` - Code improvements without functional changes (e.g., \`refactor/github-service\`)
+
+---
+
+## 4. Commit Message Standards
+We follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+\`\`\`
+<type>(<scope>): <short description>
+\`\`\`
+
+### Common Types:
+- \`feat\`: Introduces a new user-facing or API feature
+- \`fix\`: Patches a bug or resolves an issue
+- \`docs\`: Documentation updates only
+- \`test\`: Adds or refactors unit or integration tests
+- \`refactor\`: Code changes that neither fix a bug nor add a feature
+- \`chore\`: Build process or tooling changes
+
+### Examples:
+- \`feat(analyzer): support custom scoring profiles\`
+- \`fix(validator): handle trailing slashes in repository urls\`
+- \`docs: add troubleshooting steps to contributing guide\`
+- \`test(scoring): verify tailored contributing starter template\`
+
+---
+
+## 5. Running Tests & Quality Assurance
+${testSteps}
+${buildSection}
+### Quality Checklist:
+- Ensure all existing and new unit tests pass cleanly.
+- Add test coverage for any new features or bug fixes.
+- Keep changes scoped to the issue you are addressing.
+
+---
+
+## 6. Pull Request Submission
+1. **Push your changes** to your GitHub fork:
+   \`\`\`bash
+   git push origin <type>/<short-description>
+   \`\`\`
+2. **Open a Pull Request** against the upstream \`main\` branch.
+3. **Fill out the Pull Request template**:
+   - Provide a clear description of the problem and your solution.
+   - Link any relevant issues (e.g., \`Closes #104\`).
+   - List the testing performed and attach screenshots/logs if applicable.
+4. Verify that all automated Continuous Integration (CI) status checks pass.
+
+---
+
+## 7. Code Review Expectations
+- **Review Timeline**: Maintainers review open pull requests regularly and aim to respond within 2-3 business days.
+- **Review Criteria**:
+  - **Correctness**: Does the change solve the stated issue cleanly?
+  - **Quality**: Is the code clean, readable, well-commented, and maintainable?
+  - **Coverage**: Are automated tests included and passing?
+  - **Safety**: Does the pull request avoid regressions or security vulnerabilities?
+- **Addressing Feedback**: If revisions are requested, make changes on your branch and push updates. The pull request will refresh automatically.
+`;
+
   return {
     filePath: 'CONTRIBUTING.md',
-    template: `# Contributing to ${repoName}
-
-Thank you for your interest in contributing! Here are guidelines to get started.
-
-## How to Contribute
-1. **Fork the Repository**: Create your personal copy on GitHub.
-2. **Clone Locally**:
-   \`\`\`bash
-   git clone https://github.com/YOUR_USERNAME/${repoName}.git
-   cd ${repoName}
-   \`\`\`
-3. **Create a Feature Branch**:
-   \`\`\`bash
-   git checkout -b feature/your-feature-name
-   \`\`\`
-4. **Make Your Changes**: Adhere to code formatting and add unit tests for new features.
-5. **Verify Tests**: Ensure all automated checks pass locally.
-6. **Submit a Pull Request**: Provide a descriptive title and reference any related issues.
-
-## Pull Request Guidelines
-- Keep PRs focused on a single responsibility.
-- Write meaningful commit messages.
-- Update documentation when adding new features or changing APIs.
-`,
+    template,
   };
 }
 
@@ -568,6 +852,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 module.exports = {
   detectProjectType,
+  detectNodePackageManager,
   getCiTemplate,
   getTestTemplate,
   getLicenseTemplate,
@@ -577,4 +862,6 @@ module.exports = {
   getPrTemplate,
   getGitignoreTemplate,
   getReadmeTemplate,
+  isReliableName,
+  isReliableYear,
 };

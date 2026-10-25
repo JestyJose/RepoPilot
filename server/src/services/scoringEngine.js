@@ -15,6 +15,7 @@ const {
   getPrTemplate,
   getGitignoreTemplate,
   getReadmeTemplate,
+  isReliableName,
 } = require('./templateGenerator');
 
 // Weighted scoring rules definition
@@ -34,6 +35,50 @@ const SCORING_RULES = {
   TEMPLATES: { id: 'issue_pr_templates', name: 'Issue & PR Templates', maxScore: 4, category: 'Community', importance: 'low' },
   SECURITY: { id: 'security_policy', name: 'Security Policy (SECURITY.md)', maxScore: 3, category: 'Community', importance: 'low' },
 };
+
+/**
+ * Detects whether a filename represents an open-source license.
+ * Matches LICENSE, LICENSE.md, LICENSE.txt, COPYING, LICENSE-MIT, etc.
+ */
+function isLicenseFilename(name) {
+  if (!name || typeof name !== 'string') return false;
+  // Match standard license file patterns
+  if (/^(licen[sc]e|copying|unlicense)$/i.test(name)) return true;
+  if (/^(licen[sc]e|copying|unlicense)\.(md|markdown|txt|rst|mit|apache|bsd)$/i.test(name)) return true;
+  if (/^(licen[sc]e|copying|unlicense)[-_][a-z0-9._-]+(\.(md|markdown|txt|rst))?$/i.test(name)) {
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    const disallowed = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'json', 'yaml', 'yml', 'toml', 'pdf', 'zip', 'tar', 'gz', 'lock'];
+    return !disallowed.includes(ext);
+  }
+  return false;
+}
+
+/**
+ * Validates whether GitHub repository metadata indicates a recognized open-source license.
+ */
+function hasValidGithubLicense(licenseMeta) {
+  if (!licenseMeta || typeof licenseMeta !== 'object') return false;
+  const key = (licenseMeta.key || '').toLowerCase();
+  const spdx = (licenseMeta.spdx_id || '').toUpperCase();
+  const name = (licenseMeta.name || '').trim();
+
+  const isInvalidKey = !key || key === 'none' || key === 'other';
+  const isInvalidSpdx = !spdx || spdx === 'NOASSERTION' || spdx === 'NONE';
+  const isInvalidName = !name || name.toLowerCase() === 'other' || name.toLowerCase() === 'none';
+
+  if (!isInvalidKey || !isInvalidSpdx) return true;
+  if (!isInvalidName && name.toLowerCase() !== 'other') return true;
+  return false;
+}
+
+/**
+ * Detects whether a filename represents a CONTRIBUTING guide.
+ * Matches CONTRIBUTING.md, contributing.md, Contributing.txt, etc.
+ */
+function isContributingFilename(name) {
+  if (!name || typeof name !== 'string') return false;
+  return /^contributing(\.(md|markdown|txt|rst))?$/i.test(name.trim());
+}
 
 /**
  * Calculates grade and label from total score.
@@ -185,7 +230,8 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
   const allSearchable = [...rootItems, ...dotGithubContents];
   const projectType = detectProjectType(metadata, rootItems, packageJson);
   const repoName = metadata.name || 'Repository';
-  const ownerName = metadata.owner?.login || 'Maintainer';
+  const rawOwner = metadata.owner?.name || metadata.owner?.login || null;
+  const ownerName = isReliableName(rawOwner) ? rawOwner : null;
 
   // =========================================================================
   // 1. Core Documentation Category (35 pts max)
@@ -354,22 +400,31 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
   }
 
   // Check 4: Open-Source License (5 pts)
-  const hasSpdxLicense = Boolean(
-    metadata.license && (
-      (metadata.license.key && metadata.license.key !== 'other') ||
-      (metadata.license.spdx_id && metadata.license.spdx_id !== 'NOASSERTION') ||
-      metadata.license.name
-    )
+  const hasMetadataLicense = hasValidGithubLicense(metadata.license);
+  const licenseFile = rootItems.find(i => 
+    i && 
+    (!i.type || i.type === 'file') && 
+    isLicenseFilename(i.name)
   );
-  const licenseFile = findItem(rootItems, /^(licen[sc]e|copying|unlicense)([-_.][a-z0-9]+)*$/i);
-  if (hasSpdxLicense || licenseFile) {
-    const licenseName = metadata.license?.name || metadata.license?.spdx_id || (licenseFile ? licenseFile.name : 'Open Source License');
+  const hasLicense = hasMetadataLicense || Boolean(licenseFile);
+
+  if (hasLicense) {
+    const licenseName = (metadata.license && metadata.license.name) || metadata.license?.spdx_id || (licenseFile ? licenseFile.name : 'Open Source License');
+    let finding = '';
+    if (licenseFile && hasMetadataLicense) {
+      finding = `Found "${licenseFile.name}" in root directory and detected GitHub license metadata (${licenseName}).`;
+    } else if (licenseFile) {
+      finding = `Found license file "${licenseFile.name}" in repository root.`;
+    } else {
+      finding = `Recognized open-source license (${licenseName}) via GitHub repository metadata.`;
+    }
+
     checks.push({
       ...SCORING_RULES.LICENSE,
       earnedScore: 5,
       status: 'pass',
       passed: true,
-      finding: `License detected (${licenseName}).`,
+      finding,
       scoreExplanation: `Full points (+5 / 5): Recognized open-source license (${licenseName}).`,
       deductionReason: null,
     });
@@ -381,7 +436,7 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
       passed: false,
       finding: 'No open-source license detected in root or GitHub metadata.',
       scoreExplanation: '0 / 5 points: No open-source LICENSE file found.',
-      deductionReason: 'Missing open-source license file.',
+      deductionReason: 'Missing open-source license file in repository root.',
     });
     const licenseTemplate = getLicenseTemplate(ownerName);
     recommendations.push({
@@ -390,12 +445,12 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
       priority: 'medium',
       category: 'Documentation',
       estimatedEffort: '5 mins',
-      evidence: 'No LICENSE, LICENCE, COPYING, or recognized open-source terms detected.',
-      why: 'Without a license, default copyright laws apply, meaning other developers and recruiters cannot legally run, fork, or use your code.',
-      recommendedFix: 'Add a standard permissive MIT License file in your repository root.',
+      evidence: 'No recognized license file (such as LICENSE, LICENSE.md, LICENSE.txt, COPYING, or LICENSE-MIT) was found in the repository root, and GitHub license metadata is unconfigured.',
+      why: 'Without an open-source license, default copyright laws apply. Even in a public repository, other developers, companies, and engineering hiring managers cannot legally fork, run, test, or build upon your work without explicit permission.',
+      recommendedFix: 'Add a LICENSE file in your repository root. A standard MIT License is provided below as a permissive example, but choose a license appropriate for your project (e.g., MIT for broad adoption, Apache 2.0 for explicit patent grants, or GPLv3 for copyleft protection).',
       filePath: licenseTemplate.filePath,
       starterTemplate: licenseTemplate.template,
-      verificationCondition: 'Add a LICENSE file containing recognized open-source terms in your repository root.',
+      verificationCondition: 'Add a recognized open-source LICENSE file in your repository root (e.g., LICENSE, LICENSE.md, or LICENSE.txt).',
     });
   }
 
@@ -601,14 +656,19 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
   // =========================================================================
 
   // Check 8: CONTRIBUTING.md (8 pts)
-  const contributing = findItem(allSearchable, /^contributing(\.(md|markdown|txt))?$/i);
+  const contributing = allSearchable.find(item => 
+    item && 
+    (!item.type || item.type === 'file') && 
+    isContributingFilename(item.name)
+  );
+
   if (contributing) {
     checks.push({
       ...SCORING_RULES.CONTRIBUTING,
       earnedScore: 8,
       status: 'pass',
       passed: true,
-      finding: `Found "${contributing.name}".`,
+      finding: `Found "${contributing.name}"${contributing.path ? ` at ${contributing.path}` : ''}.`,
       scoreExplanation: 'Full points (+8 / 8): Contribution guide present.',
       deductionReason: null,
     });
@@ -622,19 +682,19 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
       scoreExplanation: '0 / 8 points: Missing contribution guidelines.',
       deductionReason: 'CONTRIBUTING.md not found.',
     });
-    const contributingTemplate = getContributingTemplate(repoName);
+    const contributingTemplate = getContributingTemplate(repoName, projectType, rootItems, packageJson);
     recommendations.push({
       id: 'rec_contributing_guide',
       title: 'Add a CONTRIBUTING.md guide',
       priority: 'medium',
       category: 'Community',
       estimatedEffort: '10 mins',
-      evidence: 'No CONTRIBUTING.md detected in root or .github directory.',
-      why: 'A contribution guide demonstrates open-source readiness, branch management discipline, and clean PR expectations.',
-      recommendedFix: 'Add a CONTRIBUTING.md detailing branch naming conventions, pull request expectations, and local development setup.',
+      evidence: 'No CONTRIBUTING.md, contributing.md, or .github/CONTRIBUTING.md detected in the repository.',
+      why: 'A contribution guide demonstrates team-readiness and open-source maturity to hiring managers, establishing clear standards for local setup, branch conventions, testing rigor, and code reviews.',
+      recommendedFix: 'Create a CONTRIBUTING.md guide in your repository root outlining prerequisites, local environment setup, branch naming conventions, commit message standards, running automated tests, pull request submission, and code review expectations.',
       filePath: contributingTemplate.filePath,
       starterTemplate: contributingTemplate.template,
-      verificationCondition: 'Add CONTRIBUTING.md in root or .github directory detailing PR steps.',
+      verificationCondition: 'Add a CONTRIBUTING.md file in the root or .github directory detailing local setup, test execution, and pull request steps.',
     });
   }
 
@@ -823,4 +883,7 @@ module.exports = {
   evaluateRepository,
   calculateGrade,
   detectTestingSignals,
+  isLicenseFilename,
+  hasValidGithubLicense,
+  isContributingFilename,
 };
