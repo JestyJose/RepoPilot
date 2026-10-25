@@ -89,12 +89,12 @@ function detectTestingSignals(rootItems = [], packageJson = null, projectType = 
 
   // 3. Ecosystem-specific configuration files
   const testConfig = rootItems.find(i =>
-    /^(jest\.config|vitest\.config|pytest\.ini|tox\.ini|\.mocharc|cypress\.config|playwright\.config|phpunit\.xml|\.rspec)/i.test(i.name)
+    /^(jest\.config|vitest\.config|pytest\.ini|tox\.ini|\.mocharc|cypress\.config|playwright\.config|phpunit\.xml|\.rspec|conftest\.py|noxfile\.py|setup\.cfg|test-requirements\.txt|requirements-dev\.txt|requirements_dev\.txt)/i.test(i.name)
   );
   if (testConfig) {
     return {
       detected: true,
-      evidence: `Found test configuration file "${testConfig.name}".`,
+      evidence: `Found test configuration or fixture file "${testConfig.name}".`,
       framework: testConfig.name.split('.')[0],
     };
   }
@@ -233,8 +233,18 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
   // Check 2: README Depth & Quality (10 pts)
   // Non-overlapping rule: If README is missing, score 0 with clear explanation and do NOT duplicate recommendation.
   if (readmeItem) {
-    const size = readmeItem.size || 0;
-    if (size >= 400) {
+    const size = typeof readmeItem.size === 'number' ? readmeItem.size : null;
+    if (size === null) {
+      checks.push({
+        ...SCORING_RULES.README_DEPTH,
+        earnedScore: 0,
+        status: 'unable_to_verify',
+        passed: false,
+        finding: `Found "${readmeItem.name}", but file byte size was not provided by directory metadata.`,
+        scoreExplanation: '0 / 10 points: Unable to verify documentation depth automatically.',
+        deductionReason: 'File size metadata unavailable.',
+      });
+    } else if (size >= 400) {
       checks.push({
         ...SCORING_RULES.README_DEPTH,
         earnedScore: 10,
@@ -344,10 +354,16 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
   }
 
   // Check 4: Open-Source License (5 pts)
-  const hasSpdxLicense = Boolean(metadata.license && metadata.license.key && metadata.license.key !== 'other');
-  const licenseFile = findItem(rootItems, /^license(\.(md|txt))?$/i);
+  const hasSpdxLicense = Boolean(
+    metadata.license && (
+      (metadata.license.key && metadata.license.key !== 'other') ||
+      (metadata.license.spdx_id && metadata.license.spdx_id !== 'NOASSERTION') ||
+      metadata.license.name
+    )
+  );
+  const licenseFile = findItem(rootItems, /^(licen[sc]e|copying|unlicense)([-_.][a-z0-9]+)*$/i);
   if (hasSpdxLicense || licenseFile) {
-    const licenseName = metadata.license?.name || licenseFile.name;
+    const licenseName = metadata.license?.name || metadata.license?.spdx_id || (licenseFile ? licenseFile.name : 'Open Source License');
     checks.push({
       ...SCORING_RULES.LICENSE,
       earnedScore: 5,
@@ -374,7 +390,7 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
       priority: 'medium',
       category: 'Documentation',
       estimatedEffort: '5 mins',
-      evidence: 'No LICENSE, LICENSE.md, or LICENSE.txt detected in repository root.',
+      evidence: 'No LICENSE, LICENCE, COPYING, or recognized open-source terms detected.',
       why: 'Without a license, default copyright laws apply, meaning other developers and recruiters cannot legally run, fork, or use your code.',
       recommendedFix: 'Add a standard permissive MIT License file in your repository root.',
       filePath: licenseTemplate.filePath,
@@ -468,7 +484,15 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
   // =========================================================================
 
   // Check 7: CI/CD Workflows (20 pts)
-  if (workflows.length > 0) {
+  const hasGithubWorkflows = Array.isArray(workflows) && workflows.length > 0;
+  const altCiItem = rootItems.find(i => 
+    i.name.toLowerCase() === '.circleci' ||
+    /^\.(travis|gitlab-ci|appveyor)\.ya?ml$/i.test(i.name) ||
+    /^(azure-pipelines|bitbucket-pipelines)\.ya?ml$/i.test(i.name) ||
+    /^jenkinsfile$/i.test(i.name)
+  );
+
+  if (hasGithubWorkflows) {
     const workflowNames = workflows.map(w => w.name).join(', ');
     checks.push({
       ...SCORING_RULES.CI_CD,
@@ -479,13 +503,33 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
       scoreExplanation: `Full points (+20 / 20): Found ${workflows.length} GitHub Actions workflow(s) in .github/workflows/.`,
       deductionReason: null,
     });
+  } else if (altCiItem) {
+    checks.push({
+      ...SCORING_RULES.CI_CD,
+      earnedScore: 20,
+      status: 'pass',
+      passed: true,
+      finding: `Found recognized alternative CI/CD configuration: "${altCiItem.name}".`,
+      scoreExplanation: `Full points (+20 / 20): Active CI/CD configuration detected via "${altCiItem.name}".`,
+      deductionReason: null,
+    });
+  } else if (workflows === null) {
+    checks.push({
+      ...SCORING_RULES.CI_CD,
+      earnedScore: 0,
+      status: 'unable_to_verify',
+      passed: false,
+      finding: 'Unable to verify .github/workflows directory due to API limitations or permissions.',
+      scoreExplanation: '0 / 20 points: CI/CD workflow presence could not be verified.',
+      deductionReason: 'Workflow directory could not be inspected.',
+    });
   } else {
     checks.push({
       ...SCORING_RULES.CI_CD,
       earnedScore: 0,
       status: 'needs_improvement',
       passed: false,
-      finding: 'No GitHub Actions workflows found in .github/workflows.',
+      finding: 'No GitHub Actions workflows or equivalent CI configurations detected.',
       scoreExplanation: '0 / 20 points: No automated CI/CD workflows detected.',
       deductionReason: 'Missing .github/workflows directory or active YAML pipelines.',
     });
@@ -689,9 +733,18 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
   const needsImprovementCount = checks.filter(c => c.status === 'needs_improvement').length;
   const unableToVerifyCount = checks.filter(c => c.status === 'unable_to_verify').length;
 
-  const highPriorityCount = recommendations.filter(r => r.priority === 'high').length;
-  const mediumPriorityCount = recommendations.filter(r => r.priority === 'medium').length;
-  const lowPriorityCount = recommendations.filter(r => r.priority === 'low').length;
+  // Deduplicate recommendations by id as an explicit safeguard
+  const uniqueRecsMap = new Map();
+  for (const r of recommendations) {
+    if (!uniqueRecsMap.has(r.id)) {
+      uniqueRecsMap.set(r.id, { ...r, action: r.action || r.recommendedFix });
+    }
+  }
+  const uniqueRecommendations = Array.from(uniqueRecsMap.values());
+
+  const highPriorityCount = uniqueRecommendations.filter(r => r.priority === 'high').length;
+  const mediumPriorityCount = uniqueRecommendations.filter(r => r.priority === 'medium').length;
+  const lowPriorityCount = uniqueRecommendations.filter(r => r.priority === 'low').length;
 
   return {
     score: totalScore,
@@ -708,13 +761,13 @@ function evaluateRepository({ metadata = {}, rootItems = [], workflows = [], dot
       highPriorityCount,
       mediumPriorityCount,
       lowPriorityCount,
-      totalRecommendations: recommendations.length,
+      totalRecommendations: uniqueRecommendations.length,
     },
     passedChecksCount, // kept for backward compatibility
     totalChecksCount: checks.length,
     categories,
     checks,
-    recommendations: recommendations.map(r => ({ ...r, action: r.action || r.recommendedFix })),
+    recommendations: uniqueRecommendations,
   };
 }
 
