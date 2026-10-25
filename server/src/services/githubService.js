@@ -109,7 +109,11 @@ async function getWorkflows(owner, repo) {
   try {
     const contents = await getRepoContents(owner, repo, '.github/workflows');
     if (Array.isArray(contents)) {
-      return contents.filter(item => item.name.endsWith('.yml') || item.name.endsWith('.yaml'));
+      return contents.filter(item => 
+        (item.type === 'file' || !item.type) && 
+        (item.name.endsWith('.yml') || item.name.endsWith('.yaml')) &&
+        (!item.path || item.path.startsWith('.github/workflows/'))
+      );
     }
     return [];
   } catch {
