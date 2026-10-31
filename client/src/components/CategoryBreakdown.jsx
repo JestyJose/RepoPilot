@@ -11,10 +11,10 @@ function CategoryBreakdown({ categories }) {
   };
 
   const getStatusColor = (percentage) => {
-    if (percentage >= 85) return '#3fb950'; // Green
-    if (percentage >= 65) return '#58a6ff'; // Blue
-    if (percentage >= 40) return '#d29922'; // Amber
-    return '#f85149'; // Red
+    if (percentage >= 85) return 'var(--accent-green)';
+    if (percentage >= 65) return 'var(--accent-blue)';
+    if (percentage >= 40) return 'var(--accent-amber)';
+    return 'var(--accent-red)';
   };
 
   return (

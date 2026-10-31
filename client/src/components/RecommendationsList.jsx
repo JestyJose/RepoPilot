@@ -17,9 +17,9 @@ function RecommendationsList({ recommendations = [] }) {
   }
 
   const priorityLabels = {
-    high: { label: 'High Priority', color: '#f85149', bg: 'rgba(248, 81, 73, 0.15)' },
-    medium: { label: 'Medium Priority', color: '#d29922', bg: 'rgba(210, 153, 34, 0.15)' },
-    low: { label: 'Low Priority', color: '#58a6ff', bg: 'rgba(88, 166, 255, 0.15)' },
+    high: { label: 'High Priority', color: 'var(--accent-red)', bg: 'var(--badge-red-bg)' },
+    medium: { label: 'Medium Priority', color: 'var(--accent-amber)', bg: 'var(--badge-amber-bg)' },
+    low: { label: 'Low Priority', color: 'var(--accent-blue)', bg: 'var(--badge-blue-bg)' },
   };
 
   const categories = ['Documentation', 'Code Health', 'Automation', 'Community'];

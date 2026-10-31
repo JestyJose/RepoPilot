@@ -8,84 +8,90 @@ function RepoSearchForm({ repoInput, setRepoInput, onAnalyze, isLoading }) {
     }
   };
 
-  const handleSampleClick = (sample) => {
-    setRepoInput(sample);
-    onAnalyze(sample);
+  const sampleRepositories = [
+    { label: 'expressjs/express', category: 'Backend' },
+    { label: 'facebook/react', category: 'Frontend' },
+    { label: 'vercel/next.js', category: 'Fullstack' },
+    { label: 'tailwindlabs/tailwindcss', category: 'CSS / Tooling' },
+    { label: 'torvalds/linux', category: 'Systems' },
+  ];
+
+  const handleSampleClick = (repo) => {
+    setRepoInput(repo);
+    onAnalyze(repo);
   };
 
   return (
     <div className="search-section">
-      <form onSubmit={handleSubmit} className="search-form">
-        <div className="input-wrapper">
-          <span className="input-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
-            </svg>
-          </span>
-          <input
-            type="text"
-            className="search-input"
-            value={repoInput}
-            onChange={(e) => setRepoInput(e.target.value)}
-            placeholder="Enter public repository, e.g. expressjs/express or full URL"
-            disabled={isLoading}
-            autoComplete="off"
-            spellCheck="false"
-          />
-          {repoInput && !isLoading && (
-            <button
-              type="button"
-              className="clear-btn"
-              onClick={() => setRepoInput('')}
-              title="Clear input"
-            >
-              ×
-            </button>
-          )}
-        </div>
+      <form onSubmit={handleSubmit} className="agentvet-search-bar">
+        <span className="search-icon-wrap" aria-hidden="true">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </span>
+
+        <input
+          type="text"
+          className="search-input"
+          value={repoInput}
+          onChange={(e) => setRepoInput(e.target.value)}
+          placeholder="Search repositories, e.g. facebook/react or paste GitHub URL..."
+          disabled={isLoading}
+          autoComplete="off"
+          spellCheck="false"
+        />
+
+        {repoInput && !isLoading && (
+          <button
+            type="button"
+            className="clear-btn"
+            onClick={() => setRepoInput('')}
+            title="Clear search input"
+          >
+            &times;
+          </button>
+        )}
 
         <button
           type="submit"
-          className="submit-btn"
+          className="agentvet-search-btn"
           disabled={isLoading || !repoInput.trim()}
         >
           {isLoading ? (
             <span className="btn-loading">
               <span className="spinner"></span>
-              Analyzing...
+              Auditing...
             </span>
           ) : (
-            'Analyze Repository'
+            'Search'
           )}
         </button>
       </form>
 
-      <div className="sample-repos">
-        <span className="sample-label">Try popular examples:</span>
-        <button
-          type="button"
-          className="sample-badge"
-          onClick={() => handleSampleClick('expressjs/express')}
-          disabled={isLoading}
-        >
-          expressjs/express
-        </button>
-        <button
-          type="button"
-          className="sample-badge"
-          onClick={() => handleSampleClick('facebook/react')}
-          disabled={isLoading}
-        >
-          facebook/react
-        </button>
-        <button
-          type="button"
-          className="sample-badge"
-          onClick={() => handleSampleClick('vercel/next.js')}
-          disabled={isLoading}
-        >
-          vercel/next.js
-        </button>
+      {/* Pill tags underneath search bar matching AgentVet */}
+      <div className="sample-chips-row">
+        {sampleRepositories.map((item) => (
+          <button
+            key={item.label}
+            type="button"
+            className="agentvet-pill-chip"
+            onClick={() => handleSampleClick(item.label)}
+            disabled={isLoading}
+            title={`Run benchmark audit on ${item.label}`}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
     </div>
   );

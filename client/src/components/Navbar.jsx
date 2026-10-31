@@ -1,47 +1,71 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
+import ThemeToggle from './ThemeToggle';
 
-function Navbar({ onReset, onOpenAuth, onOpenHistory }) {
+function Navbar({ onReset, onOpenAuth, onOpenHistory, onScrollToBenchmarks }) {
   const { user, signOut, loading } = useAuth();
 
   return (
     <header className="navbar">
       <div className="nav-container">
+        {/* Brand in AgentVet typography */}
         <div className="nav-brand" onClick={onReset} style={{ cursor: 'pointer' }}>
-          <div className="brand-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-            </svg>
-          </div>
-          <span className="brand-title">RepoPilot</span>
-          <span className="brand-tag">Auditor</span>
+          <div className="brand-dot"></div>
+          <span className="brand-title">RepoPilot<span className="brand-domain">.ai</span></span>
         </div>
 
-        <div className="nav-links">
-          <span className="api-badge">
-            <span className="api-dot"></span> API Connected
-          </span>
+        {/* Minimalist AgentVet-style links */}
+        <nav className="nav-menu">
+          <button type="button" className="nav-link active" onClick={onReset}>
+            Auditor
+          </button>
+          <button
+            type="button"
+            className="nav-link"
+            onClick={onScrollToBenchmarks}
+          >
+            Benchmarks
+          </button>
+          <a
+            href="https://github.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="nav-link"
+          >
+            Directory
+          </a>
+          {user && (
+            <button
+              type="button"
+              className="nav-link nav-link-highlight"
+              onClick={onOpenHistory}
+            >
+              Saved Audits
+            </button>
+          )}
+        </nav>
+
+        {/* Nav actions: Theme, API badge, Auth button */}
+        <div className="nav-actions">
+          <div className="api-status-chip" title="Connected to GitHub API & Supabase">
+            <span className="status-ping"></span>
+            <span>Live API</span>
+          </div>
+
+          <ThemeToggle />
 
           {!loading && (
             user ? (
               <div className="nav-auth-group">
                 <button
                   type="button"
-                  className="nav-btn-history"
+                  className="nav-user-pill"
                   onClick={onOpenHistory}
-                  title="View your saved repository audits"
+                  title="View your saved audits"
                 >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 8v4l3 3"/>
-                    <circle cx="12" cy="12" r="9"/>
-                  </svg>
-                  Saved Audits
+                  <span className="user-dot"></span>
+                  <span className="user-name">{user.email?.split('@')[0]}</span>
                 </button>
-
-                <div className="user-pill" title={user.email}>
-                  <span className="user-avatar-dot"></span>
-                  <span className="user-email-text">{user.email?.split('@')[0]}</span>
-                </div>
 
                 <button
                   type="button"

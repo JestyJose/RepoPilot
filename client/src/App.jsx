@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { supabase } from './services/supabaseClient';
 import Navbar from './components/Navbar';
 import RepoSearchForm from './components/RepoSearchForm';
+import BenchmarkCertificateCard from './components/BenchmarkCertificateCard';
 import RepoHeader from './components/RepoHeader';
 import ScoreGauge from './components/ScoreGauge';
 import CategoryBreakdown from './components/CategoryBreakdown';
@@ -30,6 +32,7 @@ function MainDashboard() {
   const [authMessage, setAuthMessage] = useState('');
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
+  const benchmarksRef = useRef(null);
   const { user } = useAuth();
 
   const handleAnalyze = async (inputToAnalyze) => {
@@ -41,8 +44,6 @@ function MainDashboard() {
     setIsSaved(false);
 
     try {
-      // In development, Vite proxies /api to http://localhost:5000.
-      // In production, VITE_API_URL can be set to the deployed backend URL (e.g. https://api.yourdomain.com).
       const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
       const encodedRepo = encodeURIComponent(target.trim());
       const response = await fetch(`${apiBase}/api/analyze?repo=${encodedRepo}`);
@@ -57,6 +58,8 @@ function MainDashboard() {
 
       setAuditResult(data);
       setStatus('success');
+      // Smoothly scroll down towards results
+      window.scrollTo({ top: 350, behavior: 'smooth' });
     } catch (err) {
       setAuditResult(null);
       setStatus('error');
@@ -72,7 +75,6 @@ function MainDashboard() {
 
     setIsSaving(true);
     try {
-      // Insert into PostgreSQL saved_audits table, protected by Supabase RLS
       const { error } = await supabase.from('saved_audits').insert({
         user_id: user.id,
         repository_full_name: auditResult.repository.fullName,
@@ -105,6 +107,13 @@ function MainDashboard() {
     setErrorInfo({ message: '', statusCode: null });
     setRepoInput('');
     setIsSaved(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const scrollToBenchmarks = () => {
+    if (benchmarksRef.current) {
+      benchmarksRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   };
 
   const openAuthWithMessage = (msg) => {
@@ -114,22 +123,31 @@ function MainDashboard() {
 
   return (
     <div className="app-layout">
+      {/* Background ambient lighting effects matching AgentVet */}
+      <div className="ambient-glow ambient-glow-left" aria-hidden="true" />
+      <div className="ambient-glow ambient-glow-right" aria-hidden="true" />
+
       <Navbar
         onReset={handleReset}
         onOpenAuth={() => openAuthWithMessage('')}
         onOpenHistory={() => setIsHistoryOpen(true)}
+        onScrollToBenchmarks={scrollToBenchmarks}
       />
 
       <main className="main-content">
         <div className="container">
-          {/* Hero Section */}
+          {/* Hero Section matching AgentVet typography and hierarchy */}
           <section className="hero-section">
-            <span className="hero-badge">CSE Portfolio & Internship Tool</span>
+            <div className="hero-eyebrow">
+              <span className="eyebrow-text">INDEPENDENT RATINGS FOR REPOSITORIES</span>
+            </div>
+
             <h1 className="hero-title">
-              Audit Public GitHub Repos for <span className="gradient-text">Job Readiness</span>
+              Audit <span className="gradient-highlight">repos</span> you can actually trust.
             </h1>
+
             <p className="hero-subtitle">
-              Get an instant 0–100 repository score, find missing documentation gaps, and save audit reports to your portfolio account.
+              Discover, compare, and audit repositories vetted by real benchmark standards. RepoPilot combines static code analysis with objective readiness certificates.
             </p>
 
             <RepoSearchForm
@@ -138,6 +156,16 @@ function MainDashboard() {
               onAnalyze={handleAnalyze}
               isLoading={status === 'loading'}
             />
+
+            {/* Showcase the AgentVet Benchmark Certificate Card directly in Hero when idle */}
+            {status === 'idle' && (
+              <div className="hero-cert-container">
+                <BenchmarkCertificateCard
+                  isLive={false}
+                  onSampleSelect={handleAnalyze}
+                />
+              </div>
+            )}
           </section>
 
           {/* Dynamic Content States */}
@@ -165,6 +193,13 @@ function MainDashboard() {
                 onOpenAuth={openAuthWithMessage}
               />
 
+              {/* AgentVet Benchmark Certificate Card with LIVE audited data */}
+              <BenchmarkCertificateCard
+                audit={auditResult.audit}
+                repository={auditResult.repository}
+                isLive={true}
+              />
+
               {/* Compact Audit Summary Bar */}
               <AuditSummaryBar
                 audit={auditResult.audit}
@@ -185,41 +220,76 @@ function MainDashboard() {
             </section>
           )}
 
-          {/* Empty / Welcome Feature Grid (Visible when idle) */}
+          {/* Benchmark Dimensions / Feature Grid (Visible when idle) */}
           {status === 'idle' && (
-            <section className="features-section">
-              <h3 className="features-title">What RepoPilot Audits</h3>
-              <p className="features-subtitle">
-                Recruiters and hiring managers spend less than 60 seconds reviewing portfolio repositories. We evaluate the core signals that build credibility.
-              </p>
+            <section ref={benchmarksRef} className="features-section">
+              <div className="features-header">
+                <span className="section-eyebrow">OBJECTIVE SCORING DIMENSIONS</span>
+                <h2 className="features-title">What RepoPilot Audits</h2>
+                <p className="features-subtitle">
+                  Recruiters and engineering leads spend under 60 seconds reviewing GitHub profiles. We evaluate the signals that separate production code from proof-of-concepts.
+                </p>
+              </div>
 
               <div className="features-grid">
                 <div className="feature-card">
-                  <span className="feature-icon">📄</span>
+                  <div className="card-top">
+                    <span className="feature-icon">📄</span>
+                    <span className="feature-weight">Weight 35%</span>
+                  </div>
                   <h4>Documentation Depth</h4>
-                  <p>Evaluates README existence, setup guides, repository description, and open-source licenses.</p>
-                  <span className="feature-weight">Weight: 35%</span>
+                  <p>Evaluates README existence, structured setup instructions, license clarity, and repo descriptions.</p>
+                  <div className="feature-indicator documentation"></div>
                 </div>
 
                 <div className="feature-card">
-                  <span className="feature-icon">🧪</span>
+                  <div className="card-top">
+                    <span className="feature-icon">🧪</span>
+                    <span className="feature-weight">Weight 25%</span>
+                  </div>
                   <h4>Code Health & Testing</h4>
-                  <p>Detects automated test suites (Jest, Vitest, PyTest) and .gitignore hygiene to avoid committed credentials.</p>
-                  <span className="feature-weight">Weight: 25%</span>
+                  <p>Detects automated test suites (Jest, Vitest, PyTest) and .gitignore hygiene to prevent committed credentials.</p>
+                  <div className="feature-indicator health"></div>
                 </div>
 
                 <div className="feature-card">
-                  <span className="feature-icon">⚡</span>
+                  <div className="card-top">
+                    <span className="feature-icon">⚡</span>
+                    <span className="feature-weight">Weight 20%</span>
+                  </div>
                   <h4>CI/CD Automation</h4>
-                  <p>Checks for active GitHub Actions pipelines proving that your code builds and passes tests on every commit.</p>
-                  <span className="feature-weight">Weight: 20%</span>
+                  <p>Detects active GitHub Actions workflows verifying continuous build passes and automated test runs.</p>
+                  <div className="feature-indicator automation"></div>
                 </div>
 
                 <div className="feature-card">
-                  <span className="feature-icon">👥</span>
+                  <div className="card-top">
+                    <span className="feature-icon">👥</span>
+                    <span className="feature-weight">Weight 20%</span>
+                  </div>
                   <h4>Community Standards</h4>
-                  <p>Checks for CONTRIBUTING guides, CODE_OF_CONDUCT, Security policy, and Issue/PR templates.</p>
-                  <span className="feature-weight">Weight: 20%</span>
+                  <p>Checks for CONTRIBUTING guidelines, CODE_OF_CONDUCT, Security advisories, and PR issue templates.</p>
+                  <div className="feature-indicator community"></div>
+                </div>
+              </div>
+
+              {/* Metrics trust banner */}
+              <div className="trust-metrics-strip">
+                <div className="trust-metric">
+                  <span className="metric-val">100%</span>
+                  <span className="metric-lbl">Deterministic Rules</span>
+                </div>
+                <div className="trust-metric">
+                  <span className="metric-val">12+</span>
+                  <span className="metric-lbl">Engineering Checks</span>
+                </div>
+                <div className="trust-metric">
+                  <span className="metric-val">4</span>
+                  <span className="metric-lbl">Scored Dimensions</span>
+                </div>
+                <div className="trust-metric">
+                  <span className="metric-val">0</span>
+                  <span className="metric-lbl">Vanity Metric Bias</span>
                 </div>
               </div>
             </section>
@@ -248,9 +318,11 @@ function MainDashboard() {
 
 function App() {
   return (
-    <AuthProvider>
-      <MainDashboard />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <MainDashboard />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 
